@@ -32,7 +32,7 @@ The current release is **unsigned**, so Windows may show an unknown-publisher or
 
 - **One place to play.** Browse and launch games from supported launchers and local folders.
 - **Automatic discovery.** Find Steam libraries through Steam's configuration and detect supported local installations.
-- **Make it yours.** Choose light or dark appearance, library views, and cover artwork.
+- **Make it yours.** Choose light or dark appearance, Acrylic desktop transparency, library views, and cover artwork.
 - **Downloads you can recover.** Finished game files stay in the Downloads tab after installation, so you can retry an interrupted or failed install without downloading again. AnkerGames downloads retain their recorded version and build for future update checks.
 - **Built-in updates.** Check for new Chrona releases in Settings, or open **Chrona Updater** from the Start Menu. It downloads verified GitHub Releases, installs the update, and restarts Chrona.
 - **Your setup stays with you.** Updates preserve your saved libraries, game paths, accounts, preferences, and local metadata.
