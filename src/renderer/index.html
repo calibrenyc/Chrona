@@ -1,0 +1,490 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chrona</title>
+    <script>
+      document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light';
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="welcome-screen" id="welcomeScreen" aria-label="Loading Chrona">
+      <div class="welcome-orb welcome-orb-one"></div><div class="welcome-orb welcome-orb-two"></div>
+      <div class="welcome-content">
+        <img class="welcome-mark" src="icon.png" alt="" />
+        <p class="welcome-eyebrow">CHRONA</p>
+        <h1>Loading your library</h1>
+        <p class="welcome-subtitle">Getting your games ready.</p>
+        <div class="welcome-loader" aria-hidden="true"><span></span></div>
+      </div>
+    </div>
+    <div class="titlebar">
+      <div></div>
+      <div class="titlebar-title">Chrona</div>
+      <div class="window-controls">
+        <button class="window-control" id="windowMinimize" title="Minimize">-</button>
+        <button class="window-control" id="windowMaximize" title="Maximize">□</button>
+        <button class="window-control close" id="windowClose" title="Close">×</button>
+      </div>
+    </div>
+    <div class="app-shell">
+      <header class="compact-header">
+        <button class="compact-brand" data-page="home" aria-label="Home"><img src="icon.png" alt="" />Chrona</button>
+        <nav class="app-nav compact-nav" aria-label="Main navigation">
+          <button data-page="home">Home</button><button data-page="library">Library</button><button data-page="store">Store</button><button data-page="downloads">Downloads</button><button data-page="settings">Settings</button>
+        </nav>
+        <div class="compact-window-controls"><button class="window-control" id="compactMinimize" title="Minimize">−</button><button class="window-control" id="compactMaximize" title="Maximize">□</button><button class="window-control close" id="compactClose" title="Close">×</button></div>
+      </header>
+      <aside class="sidebar">
+        <div class="window-drag"></div>
+        <div class="brand">
+          <img class="brand-mark" src="icon.png" alt="Chrona" />
+          <div>
+            <h1>Chrona</h1>
+            <p>All games</p>
+          </div>
+        </div>
+        <nav class="filters" id="filters"></nav>
+        <nav class="app-nav">
+          <button data-page="home">Home</button>
+          <button class="active" data-page="library">Library</button>
+          <button data-page="store">Store</button>
+          <button data-page="downloads">Downloads</button>
+          <button data-page="settings">Settings</button>
+        </nav>
+        <div class="locations">
+          <div class="label-row">
+            <span>Folders</span>
+            <button id="addLocation" title="Add game folder">+</button>
+          </div>
+          <div id="locationsList"></div>
+        </div>
+      </aside>
+
+      <main>
+        <section class="page home-page" id="homePage">
+          <div class="home-art" id="homeArt"></div><div class="home-shade"></div>
+          <div class="home-content"><p class="home-eyebrow">CHRONA · YOUR GAME SPACE</p><h2 id="homeGreeting">Good Evening,<br /><strong>Player</strong></h2><p class="home-caption">Your games, ready when you are.</p>
+          <nav class="app-nav home-nav" aria-label="Main navigation"><button class="active" data-page="home">Home</button><button data-page="library">Library</button><button data-page="store">Store</button><button data-page="downloads">Downloads</button><button data-page="settings">Settings</button></nav>
+          <button class="home-library-link" data-page="library">Explore your library <span>↗</span></button></div>
+        </section>
+        <section class="page active" id="libraryPage">
+          <header class="toolbar">
+            <div class="search-wrap">
+              <span>Search</span>
+              <input id="search" placeholder="Search library" />
+            </div>
+            <div class="toolbar-actions">
+              <button id="addGame">Add Game</button>
+              <button id="addCatalog">Add To Library</button>
+              <button id="scan">Scan</button>
+            </div>
+            <div class="library-view-switch"><button data-library-view="grid">Grid</button><button data-library-view="list">List</button></div>
+          </header>
+
+          <section class="content">
+            <div class="section-head">
+              <h2>Library</h2>
+              <span id="count">0 games</span>
+            </div>
+            <div class="grid" id="grid"></div>
+          </section>
+        </section>
+
+        <section class="page" id="storePage">
+          <header class="store-search">
+            <input id="storeSearch" placeholder="Search games" />
+            <button id="storeSearchButton">Search</button>
+          </header>
+          <div id="storeProviders"></div><div id="storeGenres"></div>
+          <div class="store-loading" id="storeLoading">Loading store…</div>
+          <div class="section-head"><h2 id="storeResultsTitle">New &amp; featured games</h2><span id="storeCount">0 results</span></div>
+          <div class="store-results" id="storeResults"></div>
+        </section>
+
+        <section class="page" id="downloadsPage">
+          <header class="settings-header">
+            <div><p>Game sources</p><h2>Downloads</h2></div>
+            <button id="minimizeDownload" type="button">Minimize download</button>
+          </header>
+          <section class="content downloads-page-content">
+            <div class="section-head"><h2>Active downloads</h2><span id="activeDownloadCount">0</span></div>
+            <div class="downloads-section"><div id="downloadsList" class="downloads-list"></div></div>
+            <p id="downloadStatus" class="download-page-status" hidden></p>
+            <div class="section-head downloads-history-head"><h2>Download history</h2><button id="refreshDownloadHistory" type="button">Refresh</button></div>
+            <p id="downloadHistoryMessage"></p>
+            <div id="downloadHistoryList"></div>
+          </section>
+        </section>
+
+        <section class="page settings-page" id="settingsPage">
+          <header class="settings-header">
+            <div>
+              <p>Preferences</p>
+              <h2>Settings</h2>
+            </div>
+            <button id="saveSettings">Save</button>
+          </header>
+
+          <div class="settings-grid">
+            <section class="settings-panel">
+              <h3>Appearance</h3>
+              <label class="switch-row">
+                <span>
+                  Dark mode
+                  <small>Use a deeper glass desktop style.</small>
+                </span>
+                <input type="checkbox" id="darkMode" />
+                <span class="switch-track"></span>
+              </label>
+              <label class="switch-row">
+                <span>Home artwork<small>Turn off to see your Windows desktop through Chrona's existing transparency.</small></span>
+                <input type="checkbox" id="homeBackgroundEnabled" />
+                <span class="switch-track"></span>
+              </label>
+              <label>Background source<select id="homeBackgroundSource"><option value="launcher">Launcher artwork</option><option value="game">Game artwork</option><option value="custom">Custom image</option><option value="dynamic">Dynamic · time of day</option><option value="transparent">Windows Desktop Transparency</option></select></label>
+              <label class="switch-row" id="customBackgroundRow"><span>Custom image<small id="customBackgroundName">Choose an image from this PC.</small></span><button type="button" id="chooseHomeBackground">Choose image</button></label>
+              <label class="settings-field"><span>Display name<small>Shown in your Home greeting.</small></span><input type="text" id="displayName" maxlength="32" placeholder="Player" /></label>
+              <label class="switch-row">
+                <span>
+                  Acrylic transparency
+                  <small>Show the desktop through the main background, cards, and sidebar.</small>
+                </span>
+                <input type="checkbox" id="micaTransparency" />
+                <span class="switch-track"></span>
+              </label>
+              <label>
+                Blur strength
+                <select id="glassIntensity">
+                  <option value="soft">Soft</option>
+                  <option value="high">High</option>
+                  <option value="ultra">Ultra</option>
+                </select>
+              </label>
+              <label>
+                Default library view
+                <select id="defaultView">
+                  <option value="grid">Grid</option>
+                  <option value="compact">Compact</option>
+                </select>
+              </label>
+            </section>
+
+            <section class="settings-panel">
+              <h3>Library</h3>
+              <label class="switch-row">
+                <span>
+                  Scan on startup
+                  <small>Refresh installed games when Chrona opens.</small>
+                </span>
+                <input type="checkbox" id="scanOnStartup" />
+                <span class="switch-track"></span>
+              </label>
+              <label class="switch-row">
+                <span>
+                  Cover lookup
+                  <small>Search online sources for cover art.</small>
+                </span>
+                <input type="checkbox" id="coverLookup" />
+                <span class="switch-track"></span>
+              </label>
+              <label class="switch-row">
+                <span>
+                  Steam art matching
+                  <small>Use Steam store matches for portable games.</small>
+                </span>
+                <input type="checkbox" id="steamCoverLookup" />
+                <span class="switch-track"></span>
+              </label>
+              <label>
+                SteamGridDB API key
+                <input id="steamGridDbKey" placeholder="Optional" />
+              </label>
+              <div class="account-card" id="steamAccountCard">
+                <span>Steam account</span>
+                <strong id="activeSteamName">No account selected</strong>
+                <small id="activeSteamId">Detect local Steam users to import owned games.</small>
+              </div>
+              <button id="chooseSteamAccount">Choose Steam Account</button>
+              <div class="import-actions">
+                <button id="importSteamLibrary">Import Steam Library</button>
+                <button class="danger compact" id="cancelSteamImport">Cancel Import</button>
+              </div>
+            </section>
+
+            <section class="settings-panel">
+              <h3>Launching</h3>
+              <label class="switch-row">
+                <span>
+                  Quiet launchers
+                  <small>Prefer URI launches that avoid manual launcher screens.</small>
+                </span>
+                <input type="checkbox" id="keepLaunchersQuiet" />
+                <span class="switch-track"></span>
+              </label>
+              <label class="switch-row">
+                <span>
+                  Close to tray
+                  <small>Reserved for the packaged app tray build.</small>
+                </span>
+                <input type="checkbox" id="closeToTray" />
+                <span class="switch-track"></span>
+              </label>
+            </section>
+
+            <section class="settings-panel update-settings-panel">
+              <h3>Chrona updates</h3>
+              <p class="settings-help" id="chronaUpdateStatus">Check GitHub for the latest stable Chrona release.</p>
+              <div class="settings-update-actions"><button id="checkChronaUpdateSettings">Check for updates</button><button id="installChronaUpdateSettings" class="primary" hidden>Install update</button></div>
+              <progress id="chronaUpdateProgressSettings" max="100" value="0" hidden></progress>
+            </section>
+
+            <section class="settings-panel">
+              <h3>Game folders</h3>
+              <p class="settings-help">Folders are scanned for portable games. Open one to browse its local files.</p>
+              <div class="settings-locations" id="settingsLocationsList"></div>
+              <button id="addSettingsLocation">Add game folder</button>
+            </section>
+
+            <section class="settings-panel about-panel">
+              <img class="about-logo" src="icon.png" alt="Chrona" />
+              <div>
+                <h3>Chrona</h3>
+                <p id="chronaVersion">Version loading…</p>
+                <small>Created by Calibre</small>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+    </div>
+    <!-- These controls support settings that are available through the app's
+         full settings model even when their advanced panel is not shown. -->
+    <div hidden id="advancedRuntimeControls">
+      <input id="downloadPath" /><input id="defaultInstallPath" />
+      <input id="currentVersion" /><input id="currentBuild" />
+      <input type="checkbox" id="excludeFolders" /><span id="excludeFoldersLabel"></span>
+      <button id="addSteamLibrary">Add Steam library</button><div id="steamLibrariesList"></div>
+      <button id="toggleDownloads"></button>
+      <button id="notificationsButton"></button><button id="clearNotifications"></button>
+      <button id="updateGame"></button><button id="downloadTab"></button>
+      <div id="notificationsPanel"></div><div id="notificationsList"></div><div id="notificationBadge"></div><div id="updatePanel"></div>
+    </div>
+    <div id="downloadBrowserBar" hidden>
+      <button type="button" data-browser-control="back" title="Back">←</button>
+      <button type="button" data-browser-control="forward" title="Forward">→</button>
+      <button type="button" data-browser-control="reload" title="Reload">Reload</button>
+      <span id="downloadBrowserUrl"></span>
+      <button type="button" data-browser-control="close" title="Close browser">Close</button>
+    </div>
+    <div class="modal-backdrop" id="downloadOverlay" hidden>
+      <section class="download-card" role="status" aria-live="polite">
+        <div class="chronograph"><span></span></div>
+        <strong id="downloadOverlayTitle">Downloading</strong>
+        <p id="downloadOverlayText">Preparing download…</p>
+        <div class="download-progress"><i id="downloadProgressBar"></i></div>
+        <p id="downloadOverlayTransfer" class="download-transfer"></p>
+        <button id="minimizeDownloadOverlay" type="button">Minimize download</button>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="gameModal">
+      <aside class="inspector game-dialog" id="inspector">
+        <button class="modal-close" id="closeGameModal" title="Close">Close</button>
+        <div class="cover" id="detailCover"></div>
+        <label>
+          Game name
+          <input id="gameName" />
+        </label>
+        <p id="detailMeta">Scan or select a game.</p>
+        <label>
+          Run with
+          <select id="launchType">
+            <option value="exe">Executable</option>
+            <option value="bat">Batch file</option>
+            <option value="steam">Steam</option>
+            <option value="epic">Epic Games</option>
+            <option value="xbox">Xbox app</option>
+            <option value="ubisoft">Ubisoft Connect</option>
+            <option value="uri">Custom URI</option>
+          </select>
+        </label>
+        <label>
+          Launcher path or URI
+          <div class="path-row">
+            <input id="launcherPath" />
+            <button id="pickExecutable" title="Choose launcher">Pick</button>
+          </div>
+        </label>
+        <label>
+          Launcher files in this game folder
+          <select id="launcherCandidates"></select>
+        </label>
+        <label>
+          Cover art URL
+          <div class="path-row">
+            <input id="coverUrl" />
+            <button id="findCoverArt" title="Find cover art">Find</button>
+          </div>
+        </label>
+        <label>
+          Working folder
+          <input id="workingDirectory" />
+        </label>
+        <button class="primary" id="saveGame">Save</button>
+        <button class="primary" id="installGame">Install</button>
+        <button class="danger" id="deleteGame">Remove From Library</button>
+        <button class="danger solid" id="uninstallGame">Uninstall Game</button>
+        <section class="store-panel" id="storePanel">
+          <p>Store</p>
+          <h3 id="storeTitle">No store details</h3>
+          <div class="store-tags" id="storeTags"></div>
+          <small id="storeSummary">Select a game to load store details.</small>
+          <button id="openStorePage">Open Store Page</button>
+        </section>
+      </aside>
+    </div>
+    <div class="context-menu" id="contextMenu">
+      <button data-action="play">Play</button>
+      <button data-action="install">Install</button>
+      <button data-action="browse">Browse Local Files</button>
+      <button data-action="verify">Verify Files</button>
+      <button data-action="cover">Find Cover Art</button>
+      <button data-action="delete">Remove From Library</button>
+      <button data-action="uninstall">Uninstall Game</button>
+    </div>
+    <div class="modal-backdrop" id="coverModal">
+      <section class="cover-modal">
+        <header>
+          <div>
+            <p>Artwork</p>
+            <h2>Choose Cover</h2>
+          </div>
+          <button id="closeCoverModal">Close</button>
+        </header>
+        <label>
+          Search title or paste your own link
+          <div class="path-row">
+            <input id="manualCoverUrl" placeholder="https://..." />
+            <button id="searchCoverQuery">Search</button>
+            <button id="applyManualCover">Apply</button>
+          </div>
+        </label>
+        <div class="art-grid" id="artGrid"></div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="catalogModal">
+      <section class="cover-modal">
+        <header>
+          <div>
+            <p>Library</p>
+            <h2>Add Game</h2>
+          </div>
+          <button id="closeCatalogModal">Close</button>
+        </header>
+        <div class="catalog-grid">
+          <label>
+            Game name
+            <input id="catalogName" />
+          </label>
+          <label>
+            Source
+            <select id="catalogSource">
+              <option>Steam</option>
+              <option>Epic</option>
+              <option>Ubisoft</option>
+              <option>Xbox</option>
+              <option>Manual</option>
+            </select>
+          </label>
+          <label>
+            Owner
+            <input id="catalogOwner" placeholder="Username" />
+          </label>
+          <label>
+            App or product id
+            <input id="catalogExternalId" placeholder="Steam app id, Ubisoft id, etc." />
+          </label>
+          <label>
+            Install URI
+            <input id="catalogInstallUri" placeholder="steam://install/..." />
+          </label>
+          <label>
+            Store URL
+            <input id="catalogStoreUrl" placeholder="https://..." />
+          </label>
+          <label>
+            Preferred install folder
+            <input id="catalogInstallPath" />
+          </label>
+          <label>
+            Cover URL
+            <input id="catalogCoverUrl" />
+          </label>
+        </div>
+        <button class="primary" id="saveCatalogGame">Add To Library</button>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="accountModal">
+      <section class="cover-modal">
+        <header>
+          <div>
+            <p>Accounts</p>
+            <h2>Steam Users</h2>
+          </div>
+          <button id="closeAccountModal">Close</button>
+        </header>
+        <div class="account-list" id="steamAccountList"></div>
+        <div class="account-key-prompt" id="accountKeyPrompt">
+          <label>
+            Steam Web API key for selected user
+            <input id="accountSteamApiKey" placeholder="Paste key for this Steam account" />
+          </label>
+          <button class="primary" id="saveSteamAccount">Select Account</button>
+        </div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="storeDetailModal">
+      <section class="store-detail-modal">
+        <button class="modal-close" id="closeStoreDetail">Close</button>
+        <div class="store-detail-breadcrumb" id="storeDetailCrumb">Store</div>
+        <h2 class="store-detail-heading" id="storeDetailTitle">Game details</h2>
+        <div class="store-detail-hero" id="storeDetailHero"></div>
+        <div class="store-detail-content">
+          <div>
+            <span class="platform-pill" id="storeDetailPlatform">Store</span>
+            <p id="storeDetailDescription">Loading game details…</p>
+            <div class="store-tags-panel"><details><summary>Tags</summary><div class="store-detail-tags" id="storeDetailTags"></div></details></div>
+          </div>
+          <aside class="store-detail-sidebar">
+            <dl><dt>Release</dt><dd id="storeDetailRelease">—</dd><dt>Developer</dt><dd id="storeDetailDeveloper">—</dd><dt>Publisher</dt><dd id="storeDetailPublisher">—</dd><dt>Storage</dt><dd id="storeDetailStorage">—</dd></dl>
+            <div class="store-detail-actions"><button id="storeDetailLinks">Find Links</button><button class="secondary" id="storeDetailSource">Original Source</button></div>
+          </aside>
+        </div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="linksModal">
+      <section class="cover-modal">
+        <header>
+          <div><p>Game sources</p><h2 id="linksTitle">Find Links</h2></div>
+          <button id="closeLinksModal">Close</button>
+        </header>
+        <p class="links-help">Search results from the configured game sources. Choose one to continue in Chrona.</p>
+        <div class="store-loading" id="linksLoading"><div class="chronograph"><span></span></div><strong>Finding links…</strong><small>Sources that are unavailable will still get a direct search link.</small></div>
+        <div class="links-results" id="linksResults"></div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="multipartModal">
+      <section class="cover-modal multipart-modal">
+        <header><div><p>Multi-part download</p><h2 id="multipartTitle">Downloading Multi-Part Game</h2></div><button id="closeMultipart">Close</button></header>
+        <p id="multipartSummary"></p><div id="multipartFiles" class="multipart-files"></div>
+        <div class="multipart-actions"><button id="multipartOpenPage">Open game page</button><button id="multipartConfirm" class="primary">Yes, Continue</button><button id="multipartMissing">No, Missing a File</button></div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="multipartCountModal"><section class="cover-modal multipart-modal"><header><div><p>Multi-part download</p><h2>Total Parts</h2></div></header><label>How many parts does this download contain?<input id="multipartCountInput" type="number" min="2" max="100" value="2"></label><div class="multipart-actions"><button id="multipartCountCancel">Cancel</button><button id="multipartCountConfirm" class="primary">Continue</button></div></section></div>
+    <script src="app.js"></script>
+    <script src="downloads.js"></script>
+  </body>
+</html>
