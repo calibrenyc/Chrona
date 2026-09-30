@@ -2053,14 +2053,12 @@ function configureDownloadBrowserTab(tab) {
       const parsed = new URL(next);
       if (!/^https?:$/.test(parsed.protocol)) { event.preventDefault(); void confirmExternalProtocol(next); }
       else if (isBlockedAdUrl(next)) { event.preventDefault(); blockedPopupCount++; downloadStatus('Popup blocked'); publishDownloadBrowserTabs(); }
-      else if (isMainFrame && parsed.origin !== tab.pageOrigin) { event.preventDefault(); if (downloadBrowserTabs.size < MAX_DOWNLOAD_BROWSER_TABS) createDownloadBrowserTab(next, tab.game, { activate: false, popup: true }); }
     } catch { event.preventDefault(); }
   });
   contents.on('will-redirect', (event, next, _inPlace, isMainFrame) => {
     let parsed;
     try { parsed = new URL(next); } catch { parsed = null; }
     if (!parsed || !/^https?:$/.test(parsed.protocol) || isBlockedAdUrl(next)) { event.preventDefault(); blockedPopupCount++; downloadStatus('Popup blocked'); publishDownloadBrowserTabs(); }
-    else if (isMainFrame && parsed.origin !== tab.pageOrigin) { event.preventDefault(); if (downloadBrowserTabs.size < MAX_DOWNLOAD_BROWSER_TABS) createDownloadBrowserTab(next, tab.game, { activate: false, popup: true }); }
   });
   const navigation = (_event, next) => {
     tab.url = next;

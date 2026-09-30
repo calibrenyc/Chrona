@@ -10,6 +10,14 @@ const { replace } = require('./transaction');
 let win, job, running = false, recoverySafe = false;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const status = value => { if (win && !win.isDestroyed()) win.webContents.send('updater:status', { darkMode: !!job?.darkMode, ...value }); };
+const jobFile = process.argv[process.argv.indexOf('--chrona-updater') + 1];
+try {
+  job = JSON.parse(require('node:fs').readFileSync(jobFile, 'utf8'));
+  if (!job || path.resolve(job.workspace) !== path.dirname(path.resolve(jobFile)) || path.dirname(process.execPath) !== path.join(job.workspace, 'helper')) throw new Error('Invalid updater workspace.');
+  // Electron initializes its profile paths during startup, so select the isolated
+  // helper profile before app.whenReady() rather than after Chromium is running.
+  app.setPath('userData', path.join(job.workspace, 'helper-profile'));
+} catch (error) { console.error(error); }
 async function launch(args = []) {
   const child = spawn(path.join(job.install, 'Chrona.exe'), [`--user-data-dir=${job.data}`, ...args], { detached: true, stdio: 'ignore', cwd: job.install });
   await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
@@ -74,10 +82,8 @@ ipcMain.handle('updater:action', async (_event, action) => {
   if (action === 'launch' && !running && recoverySafe) { await launch(); app.quit(); }
 });
 app.whenReady().then(async () => {
-  const jobFile = process.argv[process.argv.indexOf('--chrona-updater') + 1];
-  job = await readJson(jobFile);
+  if (!job) job = await readJson(jobFile);
   if (!job || path.resolve(job.workspace) !== path.dirname(path.resolve(jobFile)) || path.dirname(process.execPath) !== path.join(job.workspace, 'helper')) throw new Error('Invalid updater workspace.');
-  app.setPath('userData', path.join(job.workspace, 'helper-profile'));
   await fs.mkdir(path.dirname(job.logFile), { recursive: true });
   win = new BrowserWindow({ width: 600, height: 440, resizable: false, backgroundColor: '#edf1f5', title: 'Chrona Update',
     autoHideMenuBar: true, icon: path.join(__dirname, '../renderer/icon.png'),
@@ -86,5 +92,12 @@ app.whenReady().then(async () => {
   await win.loadFile(path.join(__dirname, 'worker.html'));
   await atomicJson(path.join(job.workspace, 'ready.json'), { ready: true });
   await run();
-}).catch(async error => { console.error(error); app.exit(1); });
+}).catch(async error => {
+  console.error(error);
+  if (job?.logFile) {
+    await fs.mkdir(path.dirname(job.logFile), { recursive: true }).catch(() => {});
+    await fs.appendFile(job.logFile, `${new Date().toISOString()} Updater startup failed: ${error.stack || error}\n`).catch(() => {});
+  }
+  app.exit(1);
+});
 app.on('window-all-closed', () => app.quit());

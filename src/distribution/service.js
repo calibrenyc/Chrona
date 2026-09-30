@@ -54,7 +54,13 @@ function registerUpdates(getWindow, save, getSettings, profile = app.getPath('us
       await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); }); child.unref();
       // Do not close until the helper has successfully initialized its UI.
       const deadline = Date.now() + 20000;
+      let exit = null;
+      child.once('exit', (code, signal) => { exit = { code, signal }; });
       while (!(await readJson(path.join(workspace, 'ready.json')))) {
+        if (exit) {
+          const detail = (await fs.readFile(logFile, 'utf8').catch(() => '')).split(/\r?\n/).filter(Boolean).at(-1);
+          throw new Error(detail || `The updater process exited before starting (code ${exit.code ?? 'unknown'}${exit.signal ? `, ${exit.signal}` : ''}).`);
+        }
         if (Date.now() > deadline) throw new Error('The updater could not start. Your installation has not changed.');
         await new Promise(resolve => setTimeout(resolve, 200));
       }
