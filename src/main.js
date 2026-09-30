@@ -2144,14 +2144,15 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
     const browserSession = session.fromPartition('chrona-downloads');
     downloadBrowserSession = browserSession;
     const blockedHosts = /(^|\.)((doubleclick|googlesyndication|googleadservices|googletagmanager|google-analytics|adnxs|adsrvr|taboola|outbrain|popads|popcash|propellerads|exoclick|trafficjunky|juicyads|adsterra|hilltopads|onclickads)\.)/i;
-    const adPath = /(?:^|[\/_?&=.-])(ads?|advert(?:isement)?s?|popup|popunder|banner|clickunder|sponsor)(?:[\/_?&=.-]|$)/i;
     browserSession.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
       try {
         const parsed = new URL(details.url);
         const host = parsed.hostname.toLowerCase();
         const adHost = blockedHosts.test(host) || /(^|\.)((ad|ads|advert|popup|popunder|banner|tracker|track|analytics)[0-9-]*\.)/i.test(host);
-        const adUrl = adPath.test(parsed.pathname);
-        callback({ cancel: adHost || adUrl });
+        // File hosts commonly serve the actual archive from paths such as
+        // /download/game.zip. Blocking by path keyword prevented these legitimate
+        // requests and left users on the source page with no active download.
+        callback({ cancel: adHost });
       } catch { callback({ cancel: false }); }
     });
     browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
