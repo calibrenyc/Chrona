@@ -112,6 +112,8 @@
           <section class="content downloads-page-content">
             <div class="section-head"><h2>Active downloads</h2><span id="activeDownloadCount">0</span></div>
             <div class="downloads-section"><div id="downloadsList" class="downloads-list"></div></div>
+            <div class="section-head installation-jobs-head"><h2>Game installations</h2></div>
+            <div id="installationJobsList" class="installation-jobs-list"></div>
             <p id="downloadStatus" class="download-page-status" hidden></p>
             <div class="section-head downloads-history-head"><h2>Download history</h2><button id="refreshDownloadHistory" type="button">Refresh</button></div>
             <p id="downloadHistoryMessage"></p>
@@ -242,6 +244,19 @@
             </section>
 
             <section class="settings-panel">
+              <h3>Download and install folders</h3>
+              <p class="settings-help">Choose where game archives are saved and where Chrona installs them.</p>
+              <div class="settings-folder-row"><div><strong>Downloads</strong><small id="downloadPathDisplay"></small></div><button type="button" data-folder-setting="downloadPath">Change</button></div>
+              <div class="settings-folder-row"><div><strong>Game installs</strong><small id="installPathDisplay"></small></div><button type="button" data-folder-setting="defaultInstallPath">Change</button></div>
+              <label class="switch-row">
+                <span>Microsoft Defender exclusions<small>Applies to the download and install folders shown above.</small></span>
+                <input type="checkbox" id="excludeFolders" />
+                <span class="switch-track"></span>
+              </label>
+              <div id="defenderFolderList" class="settings-folder-list"></div>
+            </section>
+
+            <section class="settings-panel">
               <h3>Game folders</h3>
               <p class="settings-help">Folders are scanned for portable games. Open one to browse its local files.</p>
               <div class="settings-locations" id="settingsLocationsList"></div>
@@ -266,7 +281,7 @@
     <div hidden id="advancedRuntimeControls">
       <input id="downloadPath" /><input id="defaultInstallPath" />
       <input id="currentVersion" /><input id="currentBuild" />
-      <input type="checkbox" id="excludeFolders" /><span id="excludeFoldersLabel"></span>
+      <span id="excludeFoldersLabel"></span>
       <button id="addSteamLibrary">Add Steam library</button><div id="steamLibrariesList"></div>
       <button id="toggleDownloads"></button>
       <button id="notificationsButton"></button><button id="clearNotifications"></button>
@@ -274,11 +289,15 @@
       <div id="notificationsPanel"></div><div id="notificationsList"></div><div id="notificationBadge"></div><div id="updatePanel"></div>
     </div>
     <div id="downloadBrowserBar" hidden>
-      <button type="button" data-browser-control="back" title="Back">←</button>
-      <button type="button" data-browser-control="forward" title="Forward">→</button>
-      <button type="button" data-browser-control="reload" title="Reload">Reload</button>
-      <span id="downloadBrowserUrl"></span>
-      <button type="button" data-browser-control="close" title="Close browser">Close</button>
+      <div id="downloadBrowserTabStrip"><div id="downloadBrowserTabs"></div><button type="button" data-browser-control="new-tab" title="New tab">+</button><span id="downloadBlockedPopups" hidden></span></div>
+      <div id="downloadBrowserControls">
+        <button type="button" data-browser-control="back" title="Back">←</button>
+        <button type="button" data-browser-control="forward" title="Forward">→</button>
+        <button type="button" data-browser-control="reload" title="Reload">Reload</button>
+        <input id="downloadBrowserUrl" type="text" aria-label="Page address" spellcheck="false" />
+        <span id="downloadBrowserToast" hidden></span>
+        <button type="button" data-browser-control="close" title="Close browser">Close</button>
+      </div>
     </div>
     <div class="modal-backdrop" id="downloadOverlay" hidden>
       <section class="download-card" role="status" aria-live="polite">

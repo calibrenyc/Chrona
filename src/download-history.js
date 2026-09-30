@@ -40,8 +40,8 @@ class DownloadHistory {
       if (!entry.multiPartFiles?.length && entry.expectedBytes > 0 && stat.size !== entry.expectedBytes) throw new Error('The saved file size does not match the completed download.');
       await this.update(entry, { status: 'installing', error: '' });
       // Use the metadata captured for these bytes, never today's website version.
-      await this.install(entry.file, entry.game, entry.installRoot, entry);
-      await this.update(entry, { status: 'installed', error: '', installedAt: new Date().toISOString() });
+      const result = await this.install(entry.file, entry.game, entry.installRoot, entry);
+      await this.update(entry, { status: result?.status || 'installed', error: '', installedAt: new Date().toISOString() });
       return true;
     } catch (error) { await this.update(entry, { status: 'failed', error: error.message }); throw error; }
     finally { this.installing.delete(id); }

@@ -1338,6 +1338,10 @@ label select,
 .settings-panel > label > input:not([type="checkbox"]),
 .settings-panel > label > select { width: 100%; min-width: 0; min-height: 36px; }
 .settings-panel .settings-help { margin: 8px 0 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.settings-folder-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--line); }
+.settings-folder-row > div { display:grid; gap:4px; min-width:0; }
+.settings-folder-row small,.settings-folder-path { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+.settings-folder-list { display:grid; gap:6px; margin-top:8px; }
 .settings-folder-row { grid-template-columns: minmax(150px, 1fr) minmax(0, 320px) auto; }
 .settings-folder-row label { margin: 0; color: var(--text); font-size: 14px; font-weight: 500; }
 .settings-folder-row input { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-strong); color: var(--text); text-overflow: ellipsis; }
@@ -1775,12 +1779,20 @@ label select,
     width: min(220px, 80%);
   }
 }
-#downloadBrowserBar { position: fixed; top: 36px; left: 0; right: 0; height: 76px; padding: 12px; background: #eef1f4; color: #182333; z-index: 10000; display: flex; gap: 10px; align-items: center; }
-#downloadBrowserTabs { display:flex; gap:4px; max-width:220px; overflow:hidden; }
-.download-tab { min-height:30px; max-width:210px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.download-tab.active { background:#d8e6f8; color:#1264a3; }
+#downloadBrowserBar { position: fixed; top: 36px; left: 0; right: 0; height: 110px; padding: 7px 10px; background: #101a2a; color: #e8eef8; border-bottom:1px solid #29374c; z-index: 10000; display:grid; grid-template-rows:42px 44px; gap:5px; }
+#downloadBrowserTabStrip,#downloadBrowserControls { display:flex; align-items:center; gap:7px; min-width:0; }
+#downloadBrowserTabs { display:flex; gap:5px; flex:1; min-width:0; overflow:auto hidden; }
+.download-browser-tab { display:flex; align-items:center; gap:8px; min-width:90px; max-width:220px; min-height:34px; padding:4px 9px; border:1px solid transparent; border-radius:9px; background:#1c2a3f; color:#bac7d9; cursor:pointer; }
+.download-browser-tab.active { background:#293a53; border-color:#3a5272; color:#fff; }
+.download-browser-tab span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.download-browser-tab small { color:#45c7e8; }
+.download-browser-tab-close { min-height:22px!important; width:22px; padding:0!important; border:0!important; background:transparent!important; color:inherit; }
+#downloadBrowserBar button { min-height:32px; padding:4px 10px; background:#1c2a3f; color:#e8eef8; border:1px solid #31415b; }
+#downloadBrowserUrl { flex:1; min-width:0; height:34px; padding:6px 10px; border:1px solid #31415b; border-radius:8px; background:#172338; color:#dce6f3; overflow:hidden; }
+#downloadBrowserBar #downloadBlockedPopups { margin-left:auto; color:#aab9ce; font-size:12px; }
 #downloadBrowserBar[hidden], #downloadStatus[hidden] { display: none; }
-#downloadBrowserUrl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#downloadBrowserUrl:focus { outline:1px solid #38bdf8; }
+#downloadBrowserToast { padding:7px 9px; border:1px solid #435776; border-radius:8px; background:#253650; color:#e4edf8; font-size:12px; white-space:nowrap; }
 #downloadStatus { position: fixed; bottom: 16px; left: 90px; right: 24px; z-index: 9999; padding: 14px 20px; border-radius: 12px; background: #182333; color: white; }
 #downloadStatus { display: none; }
 .notifications-button { margin-left:auto; position:relative; border:0; background:transparent; color:var(--text); font-size:22px; cursor:pointer; }
@@ -1833,6 +1845,21 @@ label select,
 .saved-download-error { color:var(--red); }
 .saved-download-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
 .saved-download-actions button { min-height:30px; padding:4px 10px; }
+.installation-jobs-head { margin-top:26px; }
+.installation-jobs-list { display:grid; gap:12px; }
+.installation-job { padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+.installation-job h3 { margin:0; font-size:15px; }
+.installation-job-packages { display:grid; gap:8px; margin-top:12px; }
+.installation-job-package { display:grid; grid-template-columns:minmax(140px,1fr) auto; gap:4px 12px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,.04); }
+.installation-job-package-label { display:flex; align-items:center; gap:8px; }
+.package-requirement { padding:2px 7px; border-radius:99px; background:#ffffff12; color:var(--muted); font-size:10px; text-transform:uppercase; }
+.package-requirement.required { background:#2aa9e01b; color:#70c8f3; }
+.installation-job-status { color:var(--muted); font-size:12px; }
+.installation-job-package > small,.installation-job-files { grid-column:1 / -1; margin:0; color:var(--muted); font-size:11px; }
+.installation-job-files { padding-left:18px; overflow-wrap:anywhere; }
+.installation-package-progress { grid-column:1 / -1; height:5px; overflow:hidden; border-radius:9px; background:#ffffff18; }
+.installation-package-progress i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#28aee4,#5b9cff); transition:width .25s ease; }
+.installation-overall-label { margin:12px 0 5px; color:var(--muted); font-size:12px; }
 body:has(#downloadBrowserBar:not([hidden])) #downloadStatus { top: 80px; bottom: auto; left: 240px; right: 180px; padding: 2px; z-index: 10001; font-size: 12px; }
 
 .game-dialog .update-panel[hidden] { display: none; }

@@ -72,14 +72,18 @@ async function download(asset, target, progress) {
 }
 async function unpack(archive, destination) {
   let expanded = 0; const seen = new Set();
-  await extract(archive, { dir: destination, onEntry(entry) {
-    const name = entry.fileName.replace(/\/$/, '');
-    safeRelative(name);
-    if (seen.has(name.toLowerCase())) throw new Error('Duplicate archive entry.');
-    seen.add(name.toLowerCase());
-    if (((entry.externalFileAttributes >>> 16) & 0o170000) === 0o120000) throw new Error('Archive links are not allowed.');
-    expanded += entry.uncompressedSize;
-    if (expanded > 8 * 1024 ** 3 || seen.size > 50000) throw new Error('The expanded update is too large.');
-  } });
+  const previousNoAsar = process.noAsar;
+  process.noAsar = true;
+  try {
+    await extract(archive, { dir: destination, onEntry(entry) {
+      const name = entry.fileName.replace(/\/$/, '');
+      safeRelative(name);
+      if (seen.has(name.toLowerCase())) throw new Error('Duplicate archive entry.');
+      seen.add(name.toLowerCase());
+      if (((entry.externalFileAttributes >>> 16) & 0o170000) === 0o120000) throw new Error('Archive links are not allowed.');
+      expanded += entry.uncompressedSize;
+      if (expanded > 8 * 1024 ** 3 || seen.size > 50000) throw new Error('The expanded update is too large.');
+    } });
+  } finally { process.noAsar = previousNoAsar; }
 }
 module.exports = { MANIFEST, safeRelative, hash, listFiles, validate, download, unpack };

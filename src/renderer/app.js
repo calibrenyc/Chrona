@@ -346,6 +346,10 @@ function renderSettings() {
   document.querySelector('#defaultInstallPath').value = settings.defaultInstallPath || '';
   document.querySelector('#excludeFolders').checked = !!store.defenderFoldersExcluded;
   document.querySelector('#excludeFoldersLabel').textContent = store.defenderFoldersExcluded ? 'Folders are excluding' : 'Exclude these folders';
+  document.querySelector('#downloadPathDisplay').textContent = settings.downloadPath || 'Windows Downloads folder';
+  document.querySelector('#installPathDisplay').textContent = settings.defaultInstallPath || 'Games folder in your user profile';
+  const defenderFolders = [settings.downloadPath || 'Windows Downloads folder', settings.defaultInstallPath || 'Games folder in your user profile'];
+  document.querySelector('#defenderFolderList').innerHTML = defenderFolders.map(folder => `<div class="settings-folder-path">${folder.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</div>`).join('');
   const activeSteamId = store.accounts?.activeSteamId || settings.steamId64 || '';
   const activeAccount = store.accounts?.steam?.[activeSteamId] || {};
   document.body.dataset.theme = settings.darkMode ? 'dark' : 'light';
@@ -634,18 +638,23 @@ async function openStoreLinks(game) {
       document.querySelector('#linksResults').innerHTML = `<div class="links-empty" role="status"><span aria-hidden="true">⚠</span><div><strong>No links found</strong><p>Try again later or search for a different title.</p></div><button data-retry-links>Check again</button></div>`;
       return;
     }
-      const primaryProviders = ['AnkerGames', 'Online-Fix', 'ankergames.net', 'Zeigames'];
-    const primary = links.filter(link => primaryProviders.includes(link.provider));
-    const others = links.filter(link => !primaryProviders.includes(link.provider));
-    const renderLink = link => `<button class="link-result ${primaryProviders.includes(link.provider) ? 'link-result-primary' : ''}" data-link-url="${link.url}"><strong>${link.provider}</strong><span>${link.title}</span><small>Open in Chrona ↗</small></button>`;
-    document.querySelector('#linksResults').innerHTML = `${primary.map(renderLink).join('')}${others.length ? '<h3 class="links-group-title">Others</h3>' : ''}${others.map(renderLink).join('')}`;
+      const isOnlineFix = link => /online[ -]?fix/i.test(link.provider);
+    const mainLinks = links.filter(link => !isOnlineFix(link));
+    const fixLinks = links.filter(isOnlineFix);
+    const otherLinks = [];
+    const attribute = value => String(value || '').replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+    const renderLink = (link, packageType, required) => `<button class="link-result link-result-primary" data-link-url="${attribute(link.url)}" data-package-type="${packageType}" data-package-required="${required}"><strong>${attribute(link.provider)}</strong><span>${attribute(link.title)}</span><small>${required ? 'Required' : 'Optional'} package · Open in Chrona</small></button>`;
+    const mainRequired = mainLinks.map(link => renderLink(link, 'MAIN_GAME', true)).join('');
+    const fixRequired = (downloadLinkGame.requiresOnlineFix === true && downloadLinkGame.onlineFixOptional !== true) || (Array.isArray(downloadLinkGame.requiredPackages) && downloadLinkGame.requiredPackages.some(item => String(item?.type).toUpperCase() === 'ONLINE_FIX' && item.required));
+    const fixOptions = fixLinks.map(link => renderLink(link, 'ONLINE_FIX', fixRequired)).join('');
+    document.querySelector('#linksResults').innerHTML = `${mainLinks.length ? '<h3 class="links-group-title">MAIN GAME · REQUIRED</h3>' : ''}${mainRequired}${fixLinks.length ? `<h3 class="links-group-title">ONLINE FIX · ${fixRequired ? 'REQUIRED' : 'OPTIONAL'}</h3>${fixOptions}` : ''}${otherLinks.length ? '<h3 class="links-group-title">Other links</h3>' : ''}${otherLinks.map(link => renderLink(link, 'MAIN_GAME', true)).join('')}`;
   } catch (error) {
     if (request !== linksRequest) return;
     document.querySelector('#linksLoading').classList.remove('open');
     document.querySelector('#linksResults').innerHTML = `<div class="links-empty" role="alert"><span aria-hidden="true">⚠</span><div><strong>Could not check links</strong><p>${error.message}</p></div><button data-retry-links>Check again</button></div>`;
   }
 }
-document.querySelector('#linksResults').addEventListener('click', async e => { const retry = e.target.closest('[data-retry-links]'); if (retry) return openStoreLinks(downloadLinkGame); const result = e.target.closest('[data-link-url]'); if (!result || result.disabled) return; result.disabled = true; const url = result.dataset.linkUrl; try { const sourceProvider = result.querySelector('strong')?.textContent || ''; const openResult = await window.launcher.openDownloadBrowser(url, { ...downloadLinkGame, sourceProvider }); if (openResult === 'choose-count') { window.pendingMultipart = { game: downloadLinkGame, url }; document.querySelector('#multipartCountModal').classList.add('open'); } else if (openResult !== false) { linksModal.classList.remove('open'); document.querySelector('#downloadBrowserUrl').textContent = url; document.querySelector('#downloadBrowserBar').hidden = false; } } catch (error) { result.disabled = false; showDownloadStatus(error.message); } });
+document.querySelector('#linksResults').addEventListener('click', async e => { const retry = e.target.closest('[data-retry-links]'); if (retry) return openStoreLinks(downloadLinkGame); const result = e.target.closest('[data-link-url]'); if (!result || result.disabled) return; result.disabled = true; const url = result.dataset.linkUrl; try { const sourceProvider = result.querySelector('strong')?.textContent || ''; const packageType = result.dataset.packageType || 'MAIN_GAME'; const packageRequired = result.dataset.packageRequired === 'true'; const openResult = await window.launcher.openDownloadBrowser(url, { ...downloadLinkGame, sourceProvider, packageType, packageRequired }); if (openResult === 'choose-count') { window.pendingMultipart = { game: downloadLinkGame, url }; document.querySelector('#multipartCountModal').classList.add('open'); } else if (openResult !== false) { linksModal.classList.remove('open'); document.querySelector('#downloadBrowserUrl').value = url; document.querySelector('#downloadBrowserBar').hidden = false; } } catch (error) { result.disabled = false; showDownloadStatus(error.message); } });
 document.querySelector('#closeLinksModal').addEventListener('click', () => linksModal.classList.remove('open'));
 document.querySelector('#storeDetailLinks').addEventListener('click', () => openStoreLinks(activeStoreGame));
 document.querySelector('#storeDetailSource').addEventListener('click', () => window.launcher.openStore(activeStoreGame.sourceUrl));
@@ -916,6 +925,13 @@ let currentDownloadId = null;
 function showDownloadStatus(payload, retryId = null) {
   const downloadId = payload && typeof payload === 'object' ? payload.downloadId : null;
   const message = payload && typeof payload === 'object' ? payload.message : payload;
+  if (message === 'Popup blocked') {
+    const toast = document.querySelector('#downloadBrowserToast');
+    toast.textContent = message; toast.hidden = false;
+    clearTimeout(window.downloadBrowserToastTimer);
+    window.downloadBrowserToastTimer = setTimeout(() => { toast.hidden = true; }, 1800);
+    return;
+  }
   if (downloadId) currentDownloadId = downloadId;
   const status = document.querySelector('#downloadStatus');
   status.hidden = false;
@@ -941,10 +957,37 @@ document.querySelector('#notificationsButton').addEventListener('click', () => {
 document.addEventListener('click', event => { const panel = document.querySelector('#notificationsPanel'); const button = document.querySelector('#notificationsButton'); if (!panel.hidden && !panel.contains(event.target) && !button.contains(event.target)) panel.hidden = true; });
 document.querySelector('#clearNotifications').addEventListener('click', () => { for (let i = notifications.length - 1; i >= 0; i--) if (!notifications[i].retryId) notifications.splice(i, 1); renderNotifications(); });
 document.querySelector('#downloadBrowserBar').addEventListener('click', async event => {
+  const closeTab = event.target.closest('[data-close-browser-tab]');
+  if (closeTab) { event.stopPropagation(); await window.launcher.browserControl('close-tab', closeTab.dataset.closeBrowserTab); return; }
+  const tab = event.target.closest('[data-browser-tab]');
+  if (tab) { await window.launcher.browserControl('select-tab', tab.dataset.browserTab); return; }
   const action = event.target.dataset.browserControl;
   if (!action) return;
   await window.launcher.browserControl(action);
   if (action === 'close') document.querySelector('#downloadBrowserBar').hidden = true;
+});
+document.querySelector('#downloadBrowserUrl').addEventListener('keydown', async event => {
+  if (event.key !== 'Enter') return;
+  let value = event.currentTarget.value.trim();
+  if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+  try { await window.launcher.browserControl('navigate', value); }
+  catch (error) { showDownloadStatus(error.message); }
+});
+window.launcher.onDownloadBrowserTabs(state => {
+  const strip = document.querySelector('#downloadBrowserTabs');
+  strip.replaceChildren();
+  for (const tab of state.tabs || []) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = `download-browser-tab${tab.active ? ' active' : ''}`; button.dataset.browserTab = tab.id;
+    button.title = tab.url || tab.title; button.setAttribute('aria-selected', String(!!tab.active));
+    const title = document.createElement('span'); title.textContent = tab.title || 'Download page'; button.append(title);
+    if (tab.loading) { const loading = document.createElement('small'); loading.textContent = '…'; button.append(loading); }
+    else if (tab.activity) { const activity = document.createElement('small'); activity.textContent = tab.activity.startsWith('Downloading') ? '↓' : tab.activity === 'Download ready' ? '✓' : '!'; activity.title = tab.activity; button.append(activity); }
+    const close = document.createElement('span'); close.className = 'download-browser-tab-close'; close.dataset.closeBrowserTab = tab.id; close.textContent = '×'; close.setAttribute('role', 'button'); close.setAttribute('aria-label', `Close ${tab.title || 'tab'}`); button.append(close);
+    strip.append(button);
+  }
+  document.querySelector('#downloadBlockedPopups').hidden = !state.blockedPopupCount;
+  document.querySelector('#downloadBlockedPopups').textContent = state.blockedPopupCount ? `Shield · ${state.blockedPopupCount} popups blocked` : '';
+  document.querySelector('#downloadBrowserBar').hidden = !state.visible;
 });
 window.launcher.onDownloadStatus(showDownloadStatus);
 const downloads = new Map();
@@ -1031,7 +1074,7 @@ document.querySelector('#multipartCountCancel').addEventListener('click', () => 
 document.querySelector('#multipartMissing').addEventListener('click', async () => { try { const session = await window.launcher.confirmMultipart(currentMultipartId, false); currentMultipartId = session.id; renderMultipart(); await window.launcher.openDownloadBrowser(session.originalUrl, { ...session.game, sourceProvider: 'Zeigames', downloadType: 'multi', multipartSessionId: session.id }); document.querySelector('#downloadBrowserBar').hidden = false; } catch (error) { showDownloadStatus(error.message); } });
 document.querySelector('#closeMultipart').addEventListener('click', () => document.querySelector('#multipartModal').classList.remove('open'));
 void refreshMultipart();
-window.launcher.onDownloadUrl(url => { document.querySelector('#downloadBrowserUrl').textContent = url; const tab = document.querySelector('#downloadTab'); try { tab.textContent = new URL(url).hostname; } catch { tab.textContent = 'Download source'; } });
+window.launcher.onDownloadUrl(url => { document.querySelector('#downloadBrowserUrl').value = url; });
 window.launcher.onLibraryChanged(async () => { await refresh(await window.launcher.getStore()); });
 
 // Handle the badge before the card's normal selection action.
