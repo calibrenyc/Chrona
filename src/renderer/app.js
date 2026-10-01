@@ -987,6 +987,7 @@ window.launcher.onDownloadBrowserTabs(state => {
   }
   document.querySelector('#downloadBlockedPopups').hidden = !state.blockedPopupCount;
   document.querySelector('#downloadBlockedPopups').textContent = state.blockedPopupCount ? `Shield · ${state.blockedPopupCount} popups blocked` : '';
+  document.querySelector('#downloadSourceNotice').hidden = !state.tabs?.find(tab => tab.id === state.activeTabId)?.sourceRestricted;
   document.querySelector('#downloadBrowserBar').hidden = !state.visible;
 });
 window.launcher.onDownloadStatus(showDownloadStatus);
@@ -1002,7 +1003,7 @@ function renderDownloads() {
     row.querySelector('small').textContent = item.status || 'Starting';
     row.querySelector('.download-hover span').textContent = (item.progress || 0) + '%';
     row.querySelector('em').textContent = item.rate || '';
-    const actions = item.done ? [['dismiss', 'Clear']] : item.saved ? [['history', 'View in Downloads']] : [[item.paused ? 'resume' : 'pause', item.paused ? 'Resume' : 'Pause'], ['cancel', 'Cancel']];
+    const actions = item.done ? [['dismiss', 'Delete file']] : item.saved ? [['history', 'View in Downloads']] : [[item.paused ? 'resume' : 'pause', item.paused ? 'Resume' : 'Pause'], ['cancel', 'Cancel']];
     for (const [action, label] of actions) {
       const button = document.createElement('button'); button.textContent = label; button.dataset.downloadAction = item.id; button.dataset.action = action; row.querySelector('.download-controls').append(button);
     }
@@ -1014,7 +1015,12 @@ document.querySelector('#downloadsList').addEventListener('click', async event =
   const button = event.target.closest('[data-download-action]'); if (!button) return;
   const id = button.dataset.downloadAction, action = button.dataset.action, item = downloads.get(id);
   if (action === 'history') { document.querySelector('[data-page="downloads"]').click(); return; }
-  if (action === 'dismiss') { downloads.delete(id); renderDownloads(); return; }
+  if (action === 'dismiss') {
+    if (!window.confirm('Delete this downloaded file from your computer and remove it from Chrona?')) return;
+    try { await window.launcher.dismissDownload(id); downloads.delete(id); renderDownloads(); }
+    catch (error) { showDownloadStatus(error.message); }
+    return;
+  }
   try {
     if (!(await window.launcher.controlDownload(id, action))) return;
     if (action === 'pause') item.paused = true;

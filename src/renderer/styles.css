@@ -1790,6 +1790,7 @@ label select,
 #downloadBrowserBar button { min-height:32px; padding:4px 10px; background:#1c2a3f; color:#e8eef8; border:1px solid #31415b; }
 #downloadBrowserUrl { flex:1; min-width:0; height:34px; padding:6px 10px; border:1px solid #31415b; border-radius:8px; background:#172338; color:#dce6f3; overflow:hidden; }
 #downloadBrowserBar #downloadBlockedPopups { margin-left:auto; color:#aab9ce; font-size:12px; }
+#downloadSourceNotice { color:#ffd166; font-size:12px; font-weight:700; white-space:nowrap; }
 #downloadBrowserBar[hidden], #downloadStatus[hidden] { display: none; }
 #downloadBrowserUrl:focus { outline:1px solid #38bdf8; }
 #downloadBrowserToast { padding:7px 9px; border:1px solid #435776; border-radius:8px; background:#253650; color:#e4edf8; font-size:12px; white-space:nowrap; }
@@ -1837,6 +1838,7 @@ label select,
 .downloads-page-content .downloads-section { margin-top:0; padding-top:0; border-top:0; }
 .downloads-history-head { margin-top:30px; }
 .downloads-history-head button { padding:6px 12px; }
+.downloads-history-head > div { display:flex; gap:8px; }
 .download-page-status { margin:14px 0; padding:10px 12px; border:1px solid var(--line); border-radius:8px; color:var(--muted); background:var(--panel); }
 #downloadHistoryList { display:grid; gap:12px; }
 .saved-download { padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }

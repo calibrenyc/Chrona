@@ -34,7 +34,10 @@ async function refreshDownloadHistory() {
       await window.launcher.openDownloadBrowser(entry.game.downloadSourceUrl, entry.game);
       document.querySelector('#downloadBrowserBar').hidden = false;
     }, busy);
-    historyButton(actions, 'Remove from list', () => window.launcher.dismissDownload(entry.id), busy);
+    historyButton(actions, 'Delete file', async () => {
+      if (!window.confirm(`Delete ${entry.filename || 'this downloaded file'} from your computer and remove it from Chrona?`)) return;
+      await window.launcher.dismissDownload(entry.id);
+    }, busy);
     card.append(actions); historyList.append(card);
   }
 }
@@ -88,5 +91,15 @@ window.launcher.onDownloadHistoryChanged(() => { void refreshDownloadHistory(); 
 window.launcher.onInstallationJobsChanged(() => { void refreshInstallationJobs(); });
 document.addEventListener('chrona:downloads-page', () => { void refreshDownloadHistory(); });
 document.querySelector('#refreshDownloadHistory').onclick = () => refreshDownloadHistory();
+document.querySelector('#clearDownloadHistory').onclick = async () => {
+  if (!savedDownloads.length) return;
+  if (!window.confirm(`Delete all ${savedDownloads.length} saved download${savedDownloads.length === 1 ? '' : 's'} from your computer and clear download history?`)) return;
+  const button = document.querySelector('#clearDownloadHistory');
+  button.disabled = true;
+  document.querySelector('#downloadHistoryMessage').textContent = '';
+  try { await window.launcher.clearDownloadHistory(); }
+  catch (error) { document.querySelector('#downloadHistoryMessage').textContent = error.message; }
+  finally { button.disabled = false; await refreshDownloadHistory(); }
+};
 void refreshDownloadHistory();
 void refreshInstallationJobs();

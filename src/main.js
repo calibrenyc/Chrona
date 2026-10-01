@@ -1529,7 +1529,7 @@ async function completeMultipartSession(session) {
   const installRoot = store.settings.defaultInstallPath || path.join(app.getPath('home'), 'Games');
   const job = store.installationJobs?.find(item => item.id === session.installationJobId);
   const packageRecord = job?.packages.find(item => item.id === session.packageId);
-  const record = { id: require('crypto').randomUUID(), file: first.file, game: { ...session.game, downloadVersion: null }, installRoot, installationJobId: job?.id || null, packageId: packageRecord?.id || null, multipartSessionId: session.id, multipartPackage: true, status: 'ready', complete: true, multiPartFiles: ordered.map(part => part.file), expectedBytes: (await Promise.all(ordered.map(part => fs.stat(part.file)))).reduce((total, stat) => total + stat.size, 0), createdAt: new Date().toISOString() };
+  const record = { id: require('crypto').randomUUID(), file: first.file, downloadRoot: store.settings.downloadPath || app.getPath('downloads'), game: { ...session.game, downloadVersion: null }, installRoot, installationJobId: job?.id || null, packageId: packageRecord?.id || null, multipartSessionId: session.id, multipartPackage: true, status: 'ready', complete: true, multiPartFiles: ordered.map(part => part.file), expectedBytes: (await Promise.all(ordered.map(part => fs.stat(part.file)))).reduce((total, stat) => total + stat.size, 0), createdAt: new Date().toISOString() };
   if (packageRecord) {
     packageRecord.status = 'DOWNLOADED'; packageRecord.expectedParts = session.expectedParts;
     packageRecord.file = first.file; packageRecord.files = ordered.map(part => ({ path: part.file, name: part.name, status: 'DOWNLOADED' }));
@@ -1618,6 +1618,7 @@ let downloadPageOrigin = '';
 let downloadBrowserSession;
 const downloadBrowserTabs = new Map();
 let activeDownloadTabId = null;
+let downloadBrowserVisible = false;
 let blockedPopupCount = 0;
 const downloadJobs = new Set();
 const activeDownloads = new Map();
@@ -1630,16 +1631,28 @@ function isBlockedAdUrl(value) {
     return blockedAdHosts.test(parsed.hostname) || /(^|\.)(ad|ads|advert|popup|popunder|banner|tracker|track|analytics)[0-9-]*\./i.test(parsed.hostname) || blockedAdPaths.test(parsed.pathname);
   } catch { return true; }
 }
+function isAnkerHost(value) {
+  try { const host = new URL(value).hostname.toLowerCase(); return host === 'ankergames.net' || host.endsWith('.ankergames.net'); }
+  catch { return false; }
+}
+function isAnkerDownloadTab(tab) {
+  return isAnkerHost(tab.pageOrigin) || /ankergames\.net/i.test(String(tab.game?.sourceProvider || ''));
+}
+function allowTabNavigation(tab, value) {
+  if (!/^https?:\/\//i.test(value || '') || isBlockedAdUrl(value)) return false;
+  return !isAnkerDownloadTab(tab) || isAnkerHost(value);
+}
 function publishDownloadBrowserTabs() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const tabs = [...downloadBrowserTabs.values()].map(tab => ({ id: tab.id, title: tab.title, url: tab.url, loading: tab.loading, activity: tab.activity || '', active: tab.id === activeDownloadTabId, canGoBack: tab.view.webContents.canGoBack(), canGoForward: tab.view.webContents.canGoForward() }));
-  mainWindow.webContents.send('download:tabs', { tabs, activeTabId: activeDownloadTabId, blockedPopupCount, visible: downloadBrowserTabs.size > 0 });
+  const tabs = [...downloadBrowserTabs.values()].map(tab => ({ id: tab.id, title: tab.title, url: tab.url, loading: tab.loading, activity: tab.activity || '', sourceRestricted: isAnkerDownloadTab(tab), active: tab.id === activeDownloadTabId, canGoBack: tab.view.webContents.canGoBack(), canGoForward: tab.view.webContents.canGoForward() }));
+  mainWindow.webContents.send('download:tabs', { tabs, activeTabId: activeDownloadTabId, blockedPopupCount, visible: downloadBrowserVisible && downloadBrowserTabs.size > 0 });
 }
 function activateDownloadBrowserTab(id) {
   const tab = downloadBrowserTabs.get(id);
   if (!tab) return false;
   for (const candidate of downloadBrowserTabs.values()) candidate.view.setVisible(candidate.id === id);
   activeDownloadTabId = id;
+  downloadBrowserVisible = true;
   downloadBrowser = tab.view;
   browserGame = tab.game;
   downloadAllowedOrigin = tab.allowedOrigin;
@@ -1658,7 +1671,7 @@ function removeDownloadBrowserTab(id) {
   if (activeDownloadTabId === id) {
     const next = [...downloadBrowserTabs.values()].at(-1);
     if (next) activateDownloadBrowserTab(next.id);
-    else { activeDownloadTabId = null; downloadBrowser = null; browserGame = null; publishDownloadBrowserTabs(); }
+    else { activeDownloadTabId = null; downloadBrowser = null; browserGame = null; downloadBrowserVisible = false; publishDownloadBrowserTabs(); }
   } else publishDownloadBrowserTabs();
 }
 async function confirmExternalProtocol(url) {
@@ -2034,6 +2047,9 @@ function configureDownloadBrowserTab(tab) {
       void confirmExternalProtocol(url);
       blockedPopupCount++;
       downloadStatus('Popup blocked');
+    } else if (isAnkerDownloadTab(tab) && !isAnkerHost(url)) {
+      blockedPopupCount++;
+      downloadStatus('Blocked external download: AnkerGames links must stay on ankergames.net.');
     } else if (isBlockedAdUrl(url)) {
       blockedPopupCount++;
       downloadStatus('Popup blocked');
@@ -2053,12 +2069,17 @@ function configureDownloadBrowserTab(tab) {
       const parsed = new URL(next);
       if (!/^https?:$/.test(parsed.protocol)) { event.preventDefault(); void confirmExternalProtocol(next); }
       else if (isBlockedAdUrl(next)) { event.preventDefault(); blockedPopupCount++; downloadStatus('Popup blocked'); publishDownloadBrowserTabs(); }
+      else if (isAnkerDownloadTab(tab) && !isAnkerHost(next)) { event.preventDefault(); downloadStatus('Blocked external download: AnkerGames links must stay on ankergames.net.'); }
     } catch { event.preventDefault(); }
   });
   contents.on('will-redirect', (event, next, _inPlace, isMainFrame) => {
     let parsed;
     try { parsed = new URL(next); } catch { parsed = null; }
-    if (!parsed || !/^https?:$/.test(parsed.protocol) || isBlockedAdUrl(next)) { event.preventDefault(); blockedPopupCount++; downloadStatus('Popup blocked'); publishDownloadBrowserTabs(); }
+    if (!allowTabNavigation(tab, next)) {
+      event.preventDefault();
+      if (isAnkerDownloadTab(tab) && !isAnkerHost(next)) downloadStatus('Blocked external download: AnkerGames links must stay on ankergames.net.');
+      else { blockedPopupCount++; downloadStatus('Popup blocked'); publishDownloadBrowserTabs(); }
+    }
   });
   const navigation = (_event, next) => {
     tab.url = next;
@@ -2159,6 +2180,14 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       const sourceTab = [...downloadBrowserTabs.values()].find(tab => tab.view.webContents === webContents);
       if (!sourceTab) { item.cancel(); return; }
       const selected = { ...(sourceTab?.game || browserGame) };
+      const downloadUrls = typeof item.getURLChain === 'function' ? item.getURLChain() : [item.getURL()];
+      if (isAnkerDownloadTab(sourceTab) && (!downloadUrls.length || downloadUrls.some(url => !isAnkerHost(url)))) {
+        item.cancel();
+        sourceTab.activity = 'External download blocked';
+        downloadStatus('Blocked external download: AnkerGames downloads must come only from ankergames.net.');
+        publishDownloadBrowserTabs();
+        return;
+      }
       const activeSession = selected.multipartSessionId && store.downloadSessions?.find(session => session.id === selected.multipartSessionId);
       if (selected.sourceProvider === 'Zeigames' && !activeSession && selected.downloadType !== 'single') {
         const warning = await dialog.showMessageBox(mainWindow, {
@@ -2213,13 +2242,16 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
 
       const downloadId = require('crypto').randomUUID();
       activeDownloads.set(downloadId, item);
-      const record = { id: downloadId, file, filename: downloadFilename, game: selected, installRoot: destination, installationJobId: installJob?.id || null, packageId: installPackage?.id || null, multipartSessionId: activeSession?.id || null, multipartPart: !!activeSession, status: 'downloading', complete: false,
+      const record = { id: downloadId, file, downloadRoot: folder, filename: downloadFilename, game: selected, installRoot: destination, installationJobId: installJob?.id || null, packageId: installPackage?.id || null, multipartSessionId: activeSession?.id || null, multipartPart: !!activeSession, status: 'downloading', complete: false,
         expectedBytes: item.getTotalBytes(), receivedBytes: 0, createdAt: new Date().toISOString() };
       if (installPackage) installPackage.downloadRecordId = downloadId;
       downloadHistory.entries.unshift(record);
       void appendDownloadDebugLog('DOWNLOAD', `${selected.name}; ${installPackage?.type || 'unassigned'}; ${path.basename(file)}; tab ${sourceTab.id}`);
       const persisted = saveStore();
       downloadHistory.changed();
+      downloadBrowserVisible = false;
+      for (const candidate of downloadBrowserTabs.values()) candidate.view.setVisible(false);
+      publishDownloadBrowserTabs();
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('download:started', { id: downloadId, name: selected.name });
       const startedAt = Date.now(); let lastJobPublish = 0;
       item.on('updated', () => {
@@ -2365,6 +2397,31 @@ ipcMain.handle('downloads:retry', async (_event, retryId) => {
 });
 ipcMain.handle('downloads:list', () => downloadHistory.list());
 ipcMain.handle('installation-jobs:list', () => store.installationJobs || []);
+async function safeDownloadFiles(entries) {
+  const files = new Set();
+  for (const entry of entries) {
+    const managedName = typeof entry.file === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-.+/i.test(path.basename(entry.file));
+    const root = path.resolve(entry.downloadRoot || (managedName ? path.dirname(entry.file) : store.settings.downloadPath || app.getPath('downloads')));
+    const candidates = [...new Set([entry.file, ...(entry.multiPartFiles || [])].filter(value => typeof value === 'string' && value))];
+    for (const filename of candidates) {
+      const target = path.resolve(filename);
+      const relative = path.relative(root, target);
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('This file is outside the saved Downloads folder, so Chrona cannot safely delete it.');
+      const stat = await fs.lstat(target).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+      if (!stat) continue;
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Chrona can delete only regular downloaded files.');
+      const realRoot = await fs.realpath(root);
+      const realTarget = await fs.realpath(target);
+      const realRelative = path.relative(realRoot, realTarget);
+      if (!realRelative || realRelative.startsWith('..') || path.isAbsolute(realRelative)) throw new Error('This file resolves outside the saved Downloads folder, so Chrona cannot safely delete it.');
+      files.add(target);
+    }
+  }
+  return [...files];
+}
+async function deleteDownloadFiles(entry) {
+  for (const filename of await safeDownloadFiles([entry])) await fs.unlink(filename);
+}
 ipcMain.handle('downloads:reveal', async (_event, id) => {
   const entry = downloadHistory.find(id);
   if (!(await pathExists(entry.file))) throw new Error('The saved file is no longer at this location.');
@@ -2372,7 +2429,15 @@ ipcMain.handle('downloads:reveal', async (_event, id) => {
 });
 ipcMain.handle('downloads:dismiss', async (_event, id) => {
   if (activeDownloads.has(id) || downloadHistory.installing.has(id)) throw new Error('Wait for this download or installation to finish.');
+  const entry = downloadHistory.find(id);
+  await deleteDownloadFiles(entry);
   store.downloadHistory = downloadHistory.entries.filter(item => item.id !== id);
+  await saveStore(); downloadHistory.changed(); return true;
+});
+ipcMain.handle('downloads:clear', async () => {
+  if (activeDownloads.size || downloadHistory.installing.size) throw new Error('Wait for active downloads and installations to finish before deleting all saved files.');
+  for (const filename of await safeDownloadFiles(downloadHistory.entries)) await fs.unlink(filename);
+  store.downloadHistory = [];
   await saveStore(); downloadHistory.changed(); return true;
 });
 ipcMain.handle('browser:control', (_event, action, value) => {
@@ -2382,7 +2447,19 @@ ipcMain.handle('browser:control', (_event, action, value) => {
   if (action === 'new-tab') return !!createDownloadBrowserTab('', tab?.game || browserGame || {}, { activate: true, title: 'New tab' });
   if (!tab) return false;
   const contents = tab.view.webContents;
-  if (action === 'close') { tab.view.setVisible(false); publishDownloadBrowserTabs(); }
+  if (action === 'close') {
+    downloadBrowserVisible = false;
+    for (const candidate of downloadBrowserTabs.values()) {
+      candidate.view.webContents.stop();
+      mainWindow.contentView.removeChildView(candidate.view);
+      candidate.view.webContents.close();
+    }
+    downloadBrowserTabs.clear();
+    activeDownloadTabId = null;
+    downloadBrowser = null;
+    browserGame = null;
+    publishDownloadBrowserTabs();
+  }
   if (action === 'back' && contents.canGoBack()) contents.goBack();
   if (action === 'forward' && contents.canGoForward()) contents.goForward();
   if (action === 'reload') contents.reload();

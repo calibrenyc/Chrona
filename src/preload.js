@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('launcher', {
   onDownloadStarted: (callback) => ipcRenderer.on('download:started', (_event, name) => callback(name)),
   controlDownload: (id, action) => ipcRenderer.invoke('downloads:control', id, action),
   dismissDownload: (id) => ipcRenderer.invoke('downloads:dismiss', id),
+  clearDownloadHistory: () => ipcRenderer.invoke('downloads:clear'),
   retryDownload: (retryId) => ipcRenderer.invoke('downloads:retry', retryId),
   getDownloadHistory: () => ipcRenderer.invoke('downloads:list'),
   getInstallationJobs: () => ipcRenderer.invoke('installation-jobs:list'),

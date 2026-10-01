@@ -115,7 +115,7 @@
             <div class="section-head installation-jobs-head"><h2>Game installations</h2></div>
             <div id="installationJobsList" class="installation-jobs-list"></div>
             <p id="downloadStatus" class="download-page-status" hidden></p>
-            <div class="section-head downloads-history-head"><h2>Download history</h2><button id="refreshDownloadHistory" type="button">Refresh</button></div>
+            <div class="section-head downloads-history-head"><h2>Download history</h2><div><button id="refreshDownloadHistory" type="button">Refresh</button><button id="clearDownloadHistory" type="button">Delete all files</button></div></div>
             <p id="downloadHistoryMessage"></p>
             <div id="downloadHistoryList"></div>
           </section>
@@ -289,7 +289,7 @@
       <div id="notificationsPanel"></div><div id="notificationsList"></div><div id="notificationBadge"></div><div id="updatePanel"></div>
     </div>
     <div id="downloadBrowserBar" hidden>
-      <div id="downloadBrowserTabStrip"><div id="downloadBrowserTabs"></div><button type="button" data-browser-control="new-tab" title="New tab">+</button><span id="downloadBlockedPopups" hidden></span></div>
+      <div id="downloadBrowserTabStrip"><div id="downloadBrowserTabs"></div><span id="downloadSourceNotice" hidden>AnkerGames only · other download hosts blocked</span><button type="button" data-browser-control="new-tab" title="New tab">+</button><span id="downloadBlockedPopups" hidden></span></div>
       <div id="downloadBrowserControls">
         <button type="button" data-browser-control="back" title="Back">←</button>
         <button type="button" data-browser-control="forward" title="Forward">→</button>
