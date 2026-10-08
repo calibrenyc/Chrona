@@ -2259,7 +2259,7 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       const destination = store.settings.defaultInstallPath || path.join(app.getPath('home'), 'Games');
       const folder = store.settings.downloadPath || app.getPath('downloads');
       const downloadFilename = safeFolderName(item.getFilename());
-      const file = path.join(folder, `${require('crypto').randomUUID()}-${downloadFilename}`);
+      let file = path.join(folder, `${require('crypto').randomUUID()}-${downloadFilename}`);
       item.setSavePath(file);
       downloadJobs.add(item);
       const installJob = selected.installationJobId && store.installationJobs?.find(entry => entry.id === selected.installationJobId);
@@ -2285,6 +2285,35 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       publishDownloadBrowserTabs();
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('download:started', { id: downloadId, name: selected.name });
       const startedAt = Date.now(); let lastJobPublish = 0; let providerTimedOut = false;
+      let fullSince = 0; let finalizingFullDownload = false; let forceComplete = false;
+      const recoverCompletedDownload = async () => {
+        if (finalizingFullDownload || forceComplete) return;
+        const received = item.getReceivedBytes(); const expected = item.getTotalBytes();
+        if (!expected || received < expected) { fullSince = 0; return; }
+        fullSince ||= Date.now();
+        if (Date.now() - fullSince < 5000) return;
+        finalizingFullDownload = true;
+        try {
+          const source = item.getSavePath();
+          const sourceStat = await fs.stat(source).catch(() => null);
+          if (!sourceStat?.isFile() || sourceStat.size !== expected) { finalizingFullDownload = false; return; }
+          let recovered = file;
+          if (path.resolve(source).toLowerCase() === path.resolve(recovered).toLowerCase()) {
+            const extension = path.extname(recovered);
+            recovered = recovered.slice(0, -extension.length) + '-complete' + extension;
+          }
+          await fs.copyFile(source, recovered);
+          const recoveredStat = await fs.stat(recovered);
+          if (recoveredStat.size !== expected) throw new Error('Recovered download size does not match the provider response.');
+          file = recovered; record.file = recovered;
+          forceComplete = true;
+          void appendDownloadDebugLog('DOWNLOAD', `${selected.name}; recovered completed bytes after provider did not close the download`);
+          item.cancel();
+        } catch (error) {
+          finalizingFullDownload = false;
+          void appendDownloadDebugLog('DOWNLOAD', `${selected.name}; completed-download recovery failed: ${error.message}`);
+        }
+      };
       const reportProgress = () => {
         const elapsed = Math.max(1, (Date.now() - startedAt) / 1000); const receivedBytes = item.getReceivedBytes(); const expectedBytes = item.getTotalBytes(); const speed = receivedBytes / elapsed;
         if (installPackage) { installPackage.receivedBytes = receivedBytes; installPackage.expectedBytes = expectedBytes; installPackage.progress = expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) : null; }
@@ -2297,6 +2326,7 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
           void appendDownloadDebugLog('DOWNLOAD', `${selected.name}; provider sent no data for 60 seconds; cancelling ${item.getURL()}`);
           item.cancel();
         }
+        if (expectedBytes && receivedBytes >= expectedBytes) void recoverCompletedDownload();
         if (Date.now() - lastJobPublish > 500) { lastJobPublish = Date.now(); publishInstallationJobs(); }
       };
       item.on('updated', reportProgress);
@@ -2305,11 +2335,11 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       reportProgress();
       item.once('done', async (_event, state) => {
         clearInterval(progressHeartbeat);
-        sourceTab.activity = state === 'completed' ? 'Download ready' : 'Download failed';
+        sourceTab.activity = state === 'completed' || forceComplete ? 'Download ready' : 'Download failed';
         publishDownloadBrowserTabs();
         try {
           await persisted;
-          if (state === 'completed') {
+          if (state === 'completed' || forceComplete) {
             await downloadHistory.update(record, { status: 'ready', complete: true, expectedBytes: item.getReceivedBytes(), receivedBytes: item.getReceivedBytes() });
             if (activeSession) {
               const info = multipartPartInfo(record.filename || path.basename(file));
