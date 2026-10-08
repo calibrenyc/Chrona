@@ -49,3 +49,17 @@ test('concurrent retry clicks do not launch multiple installations', async t => 
   while (!finish) await new Promise(resolve => setImmediate(resolve));
   finish(); await first;
 });
+test('restart recovers an exact-size provider file saved under its original name', async t => {
+  const f = await fixture(t, async () => {});
+  const entry = f.history.find('saved');
+  const providerFile = path.join(path.dirname(f.file), 'provider-game.zip');
+  await fs.writeFile(providerFile, 'downloaded archive');
+  entry.file = path.join(path.dirname(f.file), 'missing-managed-game.zip');
+  entry.downloadRoot = path.dirname(f.file); entry.filename = 'provider-game.zip';
+  entry.complete = false; entry.status = 'downloading'; entry.receivedBytes = 0;
+  await f.history.initialize();
+  assert.equal(entry.file, providerFile);
+  assert.equal(entry.complete, true);
+  assert.equal(entry.status, 'ready');
+  assert.equal(entry.receivedBytes, 18);
+});
