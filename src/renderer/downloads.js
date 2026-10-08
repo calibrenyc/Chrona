@@ -1,6 +1,7 @@
 const historyList = document.querySelector('#downloadHistoryList');
 const installationJobsList = document.querySelector('#installationJobsList');
 let savedDownloads = [];
+let installationJobs = [];
 const historyLabels = { downloading: 'Downloading', ready: 'Ready to install', installing: 'Installing', installed: 'Installed · file kept', applied: 'Applied to game', failed: 'Installation failed', interrupted: 'Incomplete download', cancelled: 'Download cancelled' };
 function historyElement(tag, text, className) { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; }
 function historyButton(row, label, handler, disabled = false) {
@@ -47,6 +48,7 @@ async function refreshInstallationJobs() {
   let jobs = [];
   try { jobs = await window.launcher.getInstallationJobs(); }
   catch (error) { installationJobsList.textContent = error.message; return; }
+  installationJobs = jobs;
   installationJobsList.replaceChildren();
   if (!jobs.length) { installationJobsList.append(historyElement('p', 'Your game packages will be grouped here as you download them.', 'empty')); return; }
   for (const job of jobs) {
@@ -92,14 +94,17 @@ window.launcher.onInstallationJobsChanged(() => { void refreshInstallationJobs()
 document.addEventListener('chrona:downloads-page', () => { void refreshDownloadHistory(); });
 document.querySelector('#refreshDownloadHistory').onclick = () => refreshDownloadHistory();
 document.querySelector('#clearDownloadHistory').onclick = async () => {
-  if (!savedDownloads.length) return;
-  if (!window.confirm(`Delete all ${savedDownloads.length} saved download${savedDownloads.length === 1 ? '' : 's'} from your computer and clear download history?`)) return;
+  if (!savedDownloads.length && !installationJobs.length) return;
+  const detail = savedDownloads.length
+    ? `Delete all ${savedDownloads.length} saved download${savedDownloads.length === 1 ? '' : 's'} from your computer and clear all installation entries?`
+    : 'Clear all installation entries?';
+  if (!window.confirm(detail)) return;
   const button = document.querySelector('#clearDownloadHistory');
   button.disabled = true;
   document.querySelector('#downloadHistoryMessage').textContent = '';
   try { await window.launcher.clearDownloadHistory(); }
   catch (error) { document.querySelector('#downloadHistoryMessage').textContent = error.message; }
-  finally { button.disabled = false; await refreshDownloadHistory(); }
+  finally { button.disabled = false; await refreshDownloadHistory(); await refreshInstallationJobs(); }
 };
 void refreshDownloadHistory();
 void refreshInstallationJobs();

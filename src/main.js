@@ -9,7 +9,7 @@ const { atomicJson, readJson: readDistributionJson, validStore, recoverLibraryFr
 const { registerUpdates } = require('./distribution/service');
 const releaseService = require('./distribution/releases');
 const { DownloadHistory } = require('./download-history');
-const { packageDefinition } = require('./download-providers');
+const { packageDefinition, isSupportedGamePackage } = require('./download-providers');
 const downloadHistory = new DownloadHistory({ getStore: () => store, save: () => saveStore(),
   install: (...args) => finishDownload(...args), changed: () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('downloads:changed');
@@ -2037,8 +2037,19 @@ async function chooseGameLauncher(gameId) {
 function resizeDownloadBrowser() {
   if (!downloadBrowserTabs.size && !downloadBrowser) return;
   const [width, height] = mainWindow.getContentSize();
-  for (const tab of downloadBrowserTabs.values()) tab.view.setBounds({ x: 0, y: 146, width, height: Math.max(0, height - 146) });
+  for (const tab of downloadBrowserTabs.values()) tab.view.setBounds(downloadBrowserVisible
+    ? { x: 0, y: 146, width, height: Math.max(0, height - 146) }
+    : { x: 0, y: 0, width: 0, height: 0 });
   if (!downloadBrowserTabs.size && downloadBrowser) downloadBrowser.setBounds({ x: 0, y: 146, width, height: Math.max(0, height - 146) });
+}
+
+function minimizeDownloadBrowser() {
+  downloadBrowserVisible = false;
+  for (const candidate of downloadBrowserTabs.values()) {
+    candidate.view.setVisible(false);
+    candidate.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  }
+  publishDownloadBrowserTabs();
 }
 function configureDownloadBrowserTab(tab) {
   const contents = tab.view.webContents;
@@ -2180,6 +2191,15 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       const sourceTab = [...downloadBrowserTabs.values()].find(tab => tab.view.webContents === webContents);
       if (!sourceTab) { item.cancel(); return; }
       const selected = { ...(sourceTab?.game || browserGame) };
+      const offeredFilename = item.getFilename();
+      if (!isSupportedGamePackage(offeredFilename)) {
+        item.cancel();
+        sourceTab.activity = 'Unsupported download blocked';
+        downloadStatus(`Blocked ${offeredFilename || 'an unknown file'}: Chrona accepts only ZIP, RAR, and 7z game packages.`);
+        void appendDownloadDebugLog('DOWNLOAD', `Blocked unsupported file: ${offeredFilename || '(unknown)'}`);
+        publishDownloadBrowserTabs();
+        return;
+      }
       const downloadUrls = typeof item.getURLChain === 'function' ? item.getURLChain() : [item.getURL()];
       if (isAnkerDownloadTab(sourceTab) && (!downloadUrls.length || downloadUrls.some(url => !isAnkerHost(url)))) {
         item.cancel();
@@ -2249,8 +2269,7 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       void appendDownloadDebugLog('DOWNLOAD', `${selected.name}; ${installPackage?.type || 'unassigned'}; ${path.basename(file)}; tab ${sourceTab.id}`);
       const persisted = saveStore();
       downloadHistory.changed();
-      downloadBrowserVisible = false;
-      for (const candidate of downloadBrowserTabs.values()) candidate.view.setVisible(false);
+      minimizeDownloadBrowser();
       publishDownloadBrowserTabs();
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('download:started', { id: downloadId, name: selected.name });
       const startedAt = Date.now(); let lastJobPublish = 0;
@@ -2432,15 +2451,24 @@ ipcMain.handle('downloads:dismiss', async (_event, id) => {
   const entry = downloadHistory.find(id);
   await deleteDownloadFiles(entry);
   store.downloadHistory = downloadHistory.entries.filter(item => item.id !== id);
+  if (entry.installationJobId && !store.downloadHistory.some(item => item.installationJobId === entry.installationJobId)) {
+    store.installationJobs = (store.installationJobs || []).filter(item => item.id !== entry.installationJobId);
+  }
+  if (entry.multipartSessionId && !store.downloadHistory.some(item => item.multipartSessionId === entry.multipartSessionId)) {
+    store.downloadSessions = (store.downloadSessions || []).filter(item => item.id !== entry.multipartSessionId);
+  }
   await saveStore(); downloadHistory.changed(); return true;
 });
 ipcMain.handle('downloads:clear', async () => {
   if (activeDownloads.size || downloadHistory.installing.size) throw new Error('Wait for active downloads and installations to finish before deleting all saved files.');
   for (const filename of await safeDownloadFiles(downloadHistory.entries)) await fs.unlink(filename);
   store.downloadHistory = [];
+  store.installationJobs = [];
+  store.downloadSessions = [];
   await saveStore(); downloadHistory.changed(); return true;
 });
 ipcMain.handle('browser:control', (_event, action, value) => {
+  if (action === 'minimize') { minimizeDownloadBrowser(); return true; }
   if (action === 'select-tab') return activateDownloadBrowserTab(value);
   if (action === 'close-tab') return removeDownloadBrowserTab(value);
   const tab = downloadBrowserTabs.get(activeDownloadTabId);

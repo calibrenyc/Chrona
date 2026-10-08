@@ -1041,7 +1041,10 @@ window.launcher.onDownloadHistoryChanged(async () => {
   } catch (error) { showDownloadStatus(error.message); }
 });
 document.querySelector('#toggleDownloads').addEventListener('click', event => { const list = document.querySelector('#downloadsList'); list.hidden = !list.hidden; event.currentTarget.textContent = list.hidden ? '+' : '?'; event.currentTarget.setAttribute('aria-expanded', String(!list.hidden)); });
-document.querySelector('#minimizeDownload').addEventListener('click', () => { document.querySelector('#downloadOverlay').hidden = true; });
+document.querySelector('#minimizeDownload').addEventListener('click', async () => {
+  document.querySelector('#downloadOverlay').hidden = true;
+  await window.launcher.browserControl('minimize');
+});
 document.querySelector('#minimizeDownloadOverlay').addEventListener('click', () => { document.querySelector('#downloadOverlay').hidden = true; });
 window.launcher.onDownloadStarted(payload => {
   const item = typeof payload === 'string' ? { id: payload, name: payload } : payload;
