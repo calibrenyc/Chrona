@@ -2284,14 +2284,27 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       minimizeDownloadBrowser();
       publishDownloadBrowserTabs();
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('download:started', { id: downloadId, name: selected.name });
-      const startedAt = Date.now(); let lastJobPublish = 0;
-      item.on('updated', () => {
+      const startedAt = Date.now(); let lastJobPublish = 0; let providerTimedOut = false;
+      const reportProgress = () => {
         const elapsed = Math.max(1, (Date.now() - startedAt) / 1000); const receivedBytes = item.getReceivedBytes(); const expectedBytes = item.getTotalBytes(); const speed = receivedBytes / elapsed;
         if (installPackage) { installPackage.receivedBytes = receivedBytes; installPackage.expectedBytes = expectedBytes; installPackage.progress = expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) : null; }
         downloadStatus(`Downloading: ${selected.name} — ${expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) + '%' : Math.round(receivedBytes / 1048576) + ' MB'} — ${formatRate(speed)} download, 0 B/s upload`, downloadId);
+        if (!receivedBytes && Date.now() - startedAt >= 5000) {
+          downloadStatus(`Waiting for provider: ${selected.name} - 0% - no data received yet`, downloadId);
+        }
+        if (!receivedBytes && Date.now() - startedAt >= 60000 && !providerTimedOut) {
+          providerTimedOut = true;
+          void appendDownloadDebugLog('DOWNLOAD', `${selected.name}; provider sent no data for 60 seconds; cancelling ${item.getURL()}`);
+          item.cancel();
+        }
         if (Date.now() - lastJobPublish > 500) { lastJobPublish = Date.now(); publishInstallationJobs(); }
-      });
+      };
+      item.on('updated', reportProgress);
+      const progressHeartbeat = setInterval(reportProgress, 1000);
+      progressHeartbeat.unref();
+      reportProgress();
       item.once('done', async (_event, state) => {
+        clearInterval(progressHeartbeat);
         sourceTab.activity = state === 'completed' ? 'Download ready' : 'Download failed';
         publishDownloadBrowserTabs();
         try {
@@ -2347,8 +2360,9 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
             }
           } else {
             if (installPackage) { installPackage.status = 'FAILED'; installJob.status = installPackage.required ? 'FAILED' : 'WAITING_FOR_FILES'; installJob.updatedAt = new Date().toISOString(); await saveStore(); }
-            await downloadHistory.update(record, { status: state === 'cancelled' ? 'cancelled' : 'interrupted', receivedBytes: item.getReceivedBytes(), error: 'The file did not finish downloading.' });
-            downloadStatus(`Download ${state}: ${selected.name}. Open Downloads for details.`, downloadId);
+            const error = providerTimedOut ? 'The provider did not send any file data for 60 seconds. Retry the download source.' : 'The file did not finish downloading.';
+            await downloadHistory.update(record, { status: providerTimedOut ? 'interrupted' : state === 'cancelled' ? 'cancelled' : 'interrupted', receivedBytes: item.getReceivedBytes(), error });
+            downloadStatus(providerTimedOut ? `Provider timed out: ${selected.name}. Retry the download source.` : `Download ${state}: ${selected.name}. Open Downloads for details.`, downloadId);
           }
         } catch (error) {
           if (installPackage && record.complete) { installPackage.status = 'FAILED'; installJob.status = installPackage.required ? 'FAILED' : installJob.installationTarget ? 'COMPLETE' : 'WAITING_FOR_FILES'; installJob.updatedAt = new Date().toISOString(); await saveStore().catch(() => {}); }

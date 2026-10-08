@@ -1810,6 +1810,7 @@ label select,
 .download-card > strong { display:inline-block; margin-right:8px; }
 .download-transfer { margin-top:8px; color:var(--muted); font-size:12px; }
 .download-card > button { margin-top:14px; }
+#cancelDownloadOverlay { margin-left:8px; border-color:#ff6b6b66; color:#ff9b9b; }
 .downloads-section { margin-top:18px; padding-top:18px; border-top:1px solid var(--line); }
 .downloads-heading { display:flex; align-items:center; justify-content:space-between; padding:0 10px 8px; color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
 .downloads-heading button { min-height:22px; padding:0 7px; border-radius:6px; }

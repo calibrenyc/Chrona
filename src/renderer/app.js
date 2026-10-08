@@ -946,7 +946,7 @@ function showDownloadStatus(payload, retryId = null) {
   if (transfer) document.querySelector('#downloadOverlayTransfer').textContent = transfer[1];
   const row = currentDownloadId && document.querySelector(`[data-download-row="${currentDownloadId}"]`);
   if (row) { row.querySelector('small').textContent = downloads.get(currentDownloadId)?.status || ''; row.style.setProperty('--download-progress', `${downloads.get(currentDownloadId)?.progress || 0}%`); row.querySelector('.download-hover span').textContent = `${downloads.get(currentDownloadId)?.progress || 0}%`; row.querySelector('.download-hover em').textContent = downloads.get(currentDownloadId)?.rate || ''; }
-  if (/added to Portable|updated successfully|Could not prepare|Download (cancelled|interrupted)/i.test(message)) document.querySelector('#downloadOverlay').hidden = true;
+  if (/added to Portable|updated successfully|Could not prepare|Provider timed out|Download (cancelled|interrupted)/i.test(message)) document.querySelector('#downloadOverlay').hidden = true;
 }
 const notifications = [];
 function addNotification(message, retryId = null) { notifications.unshift({ message, retryId, time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }); renderNotifications(); }
@@ -1046,6 +1046,13 @@ document.querySelector('#minimizeDownload').addEventListener('click', async () =
   await window.launcher.browserControl('minimize');
 });
 document.querySelector('#minimizeDownloadOverlay').addEventListener('click', () => { document.querySelector('#downloadOverlay').hidden = true; });
+document.querySelector('#cancelDownloadOverlay').addEventListener('click', async event => {
+  if (!currentDownloadId || !window.confirm('Cancel this download?')) return;
+  event.currentTarget.disabled = true;
+  try { await window.launcher.controlDownload(currentDownloadId, 'cancel'); }
+  catch (error) { showDownloadStatus(error.message); }
+  finally { event.currentTarget.disabled = false; }
+});
 window.launcher.onDownloadStarted(payload => {
   const item = typeof payload === 'string' ? { id: payload, name: payload } : payload;
   item.progress = 0; item.status = 'Starting…'; currentDownloadId = item.id; downloads.set(item.id, item);
