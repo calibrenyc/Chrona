@@ -2212,6 +2212,13 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
         publishDownloadBrowserTabs();
         return;
       }
+      // Assign Chrona's managed destination synchronously. Waiting for the
+      // ZeiGames single/multipart dialogs first lets Chromium open Save As.
+      const destination = store.settings.defaultInstallPath || path.join(app.getPath('home'), 'Games');
+      const folder = store.settings.downloadPath || app.getPath('downloads');
+      const downloadFilename = safeFolderName(offeredFilename);
+      let file = path.join(folder, `${require('crypto').randomUUID()}-${downloadFilename}`);
+      item.setSavePath(file);
       const downloadUrls = typeof item.getURLChain === 'function' ? item.getURLChain() : [item.getURL()];
       if (isAnkerDownloadTab(sourceTab) && (!downloadUrls.length || downloadUrls.some(url => !isAnkerHost(url)))) {
         item.cancel();
@@ -2256,11 +2263,6 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
         const found = store.downloadSessions?.find(session => session.originalUrl === selected.downloadSourceUrl && session.status !== 'completed');
         if (found) selected.multipartSessionId = found.id;
       }
-      const destination = store.settings.defaultInstallPath || path.join(app.getPath('home'), 'Games');
-      const folder = store.settings.downloadPath || app.getPath('downloads');
-      const downloadFilename = safeFolderName(item.getFilename());
-      let file = path.join(folder, `${require('crypto').randomUUID()}-${downloadFilename}`);
-      item.setSavePath(file);
       downloadJobs.add(item);
       const installJob = selected.installationJobId && store.installationJobs?.find(entry => entry.id === selected.installationJobId);
       const installPackage = installJob?.packages.find(entry => entry.id === selected.packageId);
