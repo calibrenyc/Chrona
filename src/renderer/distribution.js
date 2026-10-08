@@ -92,7 +92,7 @@ function drawSetup() {
     else { await refresh(await window.launcher.completeSetup(setupDraft)); closeGate(); void checkChronaUpdate(true); }
   }, true);
 }
-document.querySelector('#checkChronaUpdate').onclick = () => checkChronaUpdate().catch(error => { gate('Could not check for updates', error.message); action('Continue to Chrona', closeGate); });
+document.querySelector('#checkChronaUpdate')?.addEventListener('click', () => checkChronaUpdate().catch(error => { gate('Could not check for updates', error.message); action('Continue to Chrona', closeGate); }));
 async function startChrona() {
   try {
     const startup = await window.launcher.chronaStartup();

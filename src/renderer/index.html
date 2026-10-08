@@ -20,6 +20,15 @@
         <div class="welcome-loader" aria-hidden="true"><span></span></div>
       </div>
     </div>
+    <div class="distribution-gate" id="distributionGate" hidden>
+      <section class="distribution-card" role="dialog" aria-modal="true" aria-labelledby="distributionTitle">
+        <img class="distribution-mark" src="icon.png" alt="" />
+        <p class="distribution-subtitle" id="distributionSubtitle"></p>
+        <h1 id="distributionTitle"></h1>
+        <div id="distributionBody"></div>
+        <div id="distributionActions"></div>
+      </section>
+    </div>
     <div class="titlebar">
       <div></div>
       <div class="titlebar-title">Chrona</div>
@@ -506,5 +515,6 @@
     <div class="modal-backdrop" id="multipartCountModal"><section class="cover-modal multipart-modal"><header><div><p>Multi-part download</p><h2>Total Parts</h2></div></header><label>How many parts does this download contain?<input id="multipartCountInput" type="number" min="2" max="100" value="2"></label><div class="multipart-actions"><button id="multipartCountCancel">Cancel</button><button id="multipartCountConfirm" class="primary">Continue</button></div></section></div>
     <script src="app.js"></script>
     <script src="downloads.js"></script>
+    <script src="distribution.js"></script>
   </body>
 </html>

@@ -12,7 +12,16 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   const root = path.resolve('.qa', `updater-${Date.now()}`);
   const install = path.join(root, 'installed'), workspace = path.join(root, 'workspace'), data = path.join(root, 'profile');
   const token = crypto.randomUUID();
-  for (const dest of [install, path.join(workspace, 'staged'), path.join(workspace, 'helper')]) await fs.cp(path.resolve('dist/win-unpacked'), dest, { recursive: true });
+  const packageRoot = path.resolve('dist/win-unpacked');
+  const packageManifest = await readJson(path.join(packageRoot, MANIFEST));
+  async function copyPackage(dest) {
+    for (const file of [...Object.keys(packageManifest.files), MANIFEST]) {
+      const target = path.join(dest, file);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.copyFile(path.join(packageRoot, file), target);
+    }
+  }
+  for (const dest of [install, path.join(workspace, 'staged'), path.join(workspace, 'helper')]) await copyPackage(dest);
   const old = await readJson(path.join(install, MANIFEST)); old.version = '1.1.0'; await atomicJson(path.join(install, MANIFEST), old);
   await atomicJson(path.join(data, 'library.json'), { version: 1, games: [], settings: { darkMode: true, scanOnStartup: false }, addedLocations: [], setupCompleted: true, lastRunVersion: '1.1.0', customSentinel: 'preserve-me' });
   const parent = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { windowsHide: true, stdio: 'ignore' });
