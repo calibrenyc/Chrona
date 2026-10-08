@@ -8,6 +8,20 @@ class DownloadHistory {
     this.installing = new Set();
   }
   get entries() { return this.getStore().downloadHistory ||= []; }
+  async recoverProviderFile(entry, claimed = new Set()) {
+    if (!entry.filename || path.basename(entry.filename) !== entry.filename || !(entry.expectedBytes > 0)) return false;
+    const existing = await fs.stat(entry.file || '').catch(() => null);
+    if (existing?.isFile() && existing.size === entry.expectedBytes) return false;
+    const root = path.resolve(entry.downloadRoot || path.dirname(entry.file || ''));
+    const candidate = path.resolve(root, entry.filename);
+    const relative = path.relative(root, candidate);
+    if (relative.startsWith('..') || path.isAbsolute(relative) || claimed.has(candidate.toLowerCase())) return false;
+    const stat = await fs.stat(candidate).catch(() => null);
+    if (!stat?.isFile() || stat.size !== entry.expectedBytes) return false;
+    entry.file = candidate; entry.receivedBytes = stat.size; entry.complete = true; entry.status = 'ready'; entry.error = '';
+    claimed.add(candidate.toLowerCase());
+    return true;
+  }
   async initialize() {
     for (const old of this.getStore().pendingDownloads || []) {
       if (!this.entries.some(entry => entry.id === old.retryId || entry.file === old.file)) this.entries.push({
@@ -22,17 +36,7 @@ class DownloadHistory {
       // Some providers finish every byte but never close Chromium's transfer,
       // and Chromium may keep its original filename instead of setSavePath().
       // Recover that exact-size file on restart rather than downloading again.
-      if (!entry.complete && entry.filename && path.basename(entry.filename) === entry.filename && entry.expectedBytes > 0) {
-        const root = entry.downloadRoot || path.dirname(entry.file || '');
-        const candidate = path.resolve(root, entry.filename);
-        const relative = path.relative(path.resolve(root), candidate);
-        const stat = !relative.startsWith('..') && !path.isAbsolute(relative) && !recoveredFiles.has(candidate.toLowerCase())
-          ? await fs.stat(candidate).catch(() => null) : null;
-        if (stat?.isFile() && stat.size === entry.expectedBytes) {
-          entry.file = candidate; entry.receivedBytes = stat.size; entry.complete = true; entry.status = 'ready'; entry.error = '';
-          recoveredFiles.add(candidate.toLowerCase());
-        }
-      }
+      await this.recoverProviderFile(entry, recoveredFiles);
     }
     this.getStore().pendingDownloads = [];
     await this.save();
@@ -51,7 +55,11 @@ class DownloadHistory {
     if (!entry.complete) throw new Error('This download is incomplete. Open its source to download the remaining file before installing.');
     this.installing.add(id);
     try {
-      const stat = await fs.stat(entry.file).catch(() => null);
+      let stat = await fs.stat(entry.file).catch(() => null);
+      if (!stat?.isFile() || !stat.size) {
+        await this.recoverProviderFile(entry);
+        stat = await fs.stat(entry.file).catch(() => null);
+      }
       if (!stat?.isFile() || !stat.size) throw new Error('The saved download is missing or empty. Restore the file to its saved location.');
       if (!entry.multiPartFiles?.length && entry.expectedBytes > 0 && stat.size !== entry.expectedBytes) throw new Error('The saved file size does not match the completed download.');
       await this.update(entry, { status: 'installing', error: '' });

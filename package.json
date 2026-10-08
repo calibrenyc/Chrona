@@ -1,6 +1,6 @@
 {
   "name": "chrona-game-launcher",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "description": "Chrona, a local-first game launcher for Steam, Epic, Xbox, Ubisoft, and portable installs.",
   "author": "Calibre",
   "chronaUpdates": {

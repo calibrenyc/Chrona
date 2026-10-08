@@ -63,3 +63,15 @@ test('restart recovers an exact-size provider file saved under its original name
   assert.equal(entry.status, 'ready');
   assert.equal(entry.receivedBytes, 18);
 });
+test('retry recovers a complete record whose managed file was removed', async t => {
+  const attempts = []; const f = await fixture(t, async file => attempts.push(file));
+  const entry = f.history.find('saved');
+  const providerFile = path.join(path.dirname(f.file), 'provider-game.zip');
+  await fs.writeFile(providerFile, 'downloaded archive');
+  entry.file = path.join(path.dirname(f.file), 'deleted-managed-game.zip');
+  entry.downloadRoot = path.dirname(f.file); entry.filename = 'provider-game.zip';
+  entry.complete = true; entry.status = 'failed'; entry.error = 'The saved download is missing.';
+  await f.history.installSaved('saved');
+  assert.deepEqual(attempts, [providerFile]);
+  assert.equal(entry.status, 'installed');
+});
