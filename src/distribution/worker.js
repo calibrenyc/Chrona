@@ -1,7 +1,4 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
-// The update archive contains resources/app.asar. Disable Electron's virtual
-// ASAR filesystem before extract-zip opens that destination for writing.
-process.noAsar = true;
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');

@@ -162,6 +162,14 @@ async function saveStore() {
   await write;
 }
 
+async function writeUpdateHealthReceipt() {
+  const index = process.argv.indexOf('--chrona-update-health');
+  const token = index >= 0 ? process.argv[index + 1] : '';
+  if (!/^[a-f0-9-]{36}$/.test(token || '')) return false;
+  await atomicJson(path.join(app.getPath('userData'), `update-health-${token}.json`), { version: app.getVersion(), token });
+  return true;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -1601,6 +1609,10 @@ app.whenReady().then(async () => {
   await saveStore();
   registerUpdates(() => mainWindow, saveStore, () => store.settings);
   createWindow();
+  // The updater needs a process-level health signal. Do not depend on the
+  // renderer reaching an IPC call: the main process has already loaded and
+  // validated the profile successfully at this point.
+  await writeUpdateHealthReceipt();
   void checkTrackedUpdates();
   setInterval(() => void checkTrackedUpdates(), UPDATE_INTERVAL).unref();
 }).catch(error => {
@@ -2367,9 +2379,7 @@ ipcMain.handle('chrona:startup', async () => {
   return { version, setupRequired: !store.setupCompleted, release: startupRelease, settings: store.settings, locations: store.addedLocations, installPath: path.dirname(process.execPath) };
 });
 ipcMain.handle('chrona:ready', async () => {
-  const index = process.argv.indexOf('--chrona-update-health');
-  const token = index >= 0 ? process.argv[index + 1] : '';
-  if (/^[a-f0-9-]{36}$/.test(token || '')) await atomicJson(path.join(app.getPath('userData'), `update-health-${token}.json`), { version: app.getVersion(), token });
+  await writeUpdateHealthReceipt();
   return true;
 });
 ipcMain.handle('chrona:notesSeen', async () => {
