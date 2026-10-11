@@ -1854,6 +1854,7 @@ label select,
 .installation-jobs-list { display:grid; gap:12px; }
 .installation-job { padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
 .installation-job h3 { margin:0; font-size:15px; }
+.installation-job-remove,.installation-job-resume { min-height:28px; padding:3px 10px; }.installation-job-resume { margin-left:auto; }
 .installation-job-packages { display:grid; gap:8px; margin-top:12px; }
 .installation-job-package { display:grid; grid-template-columns:minmax(140px,1fr) auto; gap:4px 12px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,.04); }
 .installation-job-package-label { display:flex; align-items:center; gap:8px; }

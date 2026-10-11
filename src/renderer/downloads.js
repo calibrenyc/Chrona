@@ -42,8 +42,8 @@ async function refreshDownloadHistory() {
     card.append(actions); historyList.append(card);
   }
 }
-const jobLabels = { WAITING_FOR_FILES: 'Waiting for required files', DOWNLOADING: 'Downloading', DOWNLOADED: 'Ready to install', INSTALLING: 'Installing', APPLYING: 'Applying add-on', COMPLETE: 'Installed', FAILED: 'Installation failed' };
-const packageLabels = { WAITING: 'Waiting', DOWNLOADING: 'Downloading', DOWNLOADED: 'Downloaded', EXTRACTING: 'Extracting', READY: 'Ready', INSTALLING: 'Installing', APPLYING: 'Applying', COMPLETE: 'Complete', FAILED: 'Failed' };
+const jobLabels = { AWAITING_DOWNLOAD: 'Source opened', WAITING_FOR_FILES: 'Waiting for required files', DOWNLOADING: 'Downloading', DOWNLOADED: 'Ready to install', INSTALLING: 'Installing', APPLYING: 'Applying add-on', COMPLETE: 'Installed', FAILED: 'Installation failed' };
+const packageLabels = { WAITING: 'Waiting for download', DOWNLOADING: 'Downloading', DOWNLOADED: 'Downloaded', EXTRACTING: 'Extracting', READY: 'Ready', INSTALLING: 'Installing', APPLYING: 'Applying', COMPLETE: 'Complete', FAILED: 'Failed' };
 async function refreshInstallationJobs() {
   let jobs = [];
   try { jobs = await window.launcher.getInstallationJobs(); }
@@ -55,6 +55,23 @@ async function refreshInstallationJobs() {
     const card = document.createElement('article'); card.className = 'installation-job';
     const heading = document.createElement('div'); heading.className = 'saved-download-heading';
     heading.append(historyElement('h3', job.gameName || 'Game'), historyElement('span', jobLabels[job.status] || job.status || 'Waiting', 'platform-pill'));
+    if (!(job.packages || []).some(pkg => pkg.downloadRecordId || ['DOWNLOADING', 'EXTRACTING', 'APPLYING', 'INSTALLING'].includes(pkg.status))) {
+      const mainPackage = (job.packages || []).find(pkg => pkg.type === 'MAIN_GAME' && pkg.downloadUrl);
+      if (mainPackage) {
+        const resume = historyElement('button', 'Continue download'); resume.className = 'installation-job-resume';
+        resume.onclick = async () => {
+          try {
+            await window.launcher.openDownloadBrowser(mainPackage.downloadUrl, { ...(job.game || {}), id: job.gameId, name: job.gameName,
+              sourceProvider: mainPackage.source, packageType: 'MAIN_GAME', packageId: mainPackage.id, installationJobId: job.id });
+            document.querySelector('#downloadBrowserBar').hidden = false;
+          } catch (error) { document.querySelector('#downloadHistoryMessage').textContent = error.message; }
+        };
+        heading.append(resume);
+      }
+      const remove = historyElement('button', 'Remove'); remove.className = 'installation-job-remove';
+      remove.onclick = async () => { try { await window.launcher.dismissInstallationJob(job.id); await refreshInstallationJobs(); } catch (error) { document.querySelector('#downloadHistoryMessage').textContent = error.message; } };
+      heading.append(remove);
+    }
     card.append(heading);
     const packages = document.createElement('div'); packages.className = 'installation-job-packages';
     for (const pkg of job.packages || []) {
@@ -97,6 +114,14 @@ window.launcher.onDownloadHistoryChanged(() => { void refreshDownloadHistory(); 
 window.launcher.onInstallationJobsChanged(() => { void refreshInstallationJobs(); });
 document.addEventListener('chrona:downloads-page', () => { void refreshDownloadHistory(); });
 document.querySelector('#refreshDownloadHistory').onclick = () => refreshDownloadHistory();
+document.querySelector('#clearDownloadList').onclick = async () => {
+  if (!savedDownloads.length && !installationJobs.length) return;
+  if (!window.confirm('Clear inactive downloads and installation entries? Downloaded files will remain on your computer.')) return;
+  const button = document.querySelector('#clearDownloadList'); button.disabled = true;
+  try { await window.launcher.clearDownloadList(); }
+  catch (error) { document.querySelector('#downloadHistoryMessage').textContent = error.message; }
+  finally { button.disabled = false; await refreshDownloadHistory(); await refreshInstallationJobs(); }
+};
 document.querySelector('#clearDownloadHistory').onclick = async () => {
   if (!savedDownloads.length && !installationJobs.length) return;
   const detail = savedDownloads.length

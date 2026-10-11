@@ -1114,7 +1114,7 @@ async function findGameLinks(game) {
   const primary = [];
   const providerState = new Map();
   const googleHtml = search => fetch(`https://www.google.com/search?q=${encodeURIComponent(search)}`, {
-    headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000)
+    headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(2500)
   }).then(response => response.ok ? response.text() : '').catch(() => '');
   // Start both independent lookups together so one source cannot make the
   // other wait through its entire network timeout.
@@ -1198,10 +1198,10 @@ async function findGameLinks(game) {
   } catch { providerState.set('Zeigames', 'unavailable'); }
   // Do not fabricate hits from generic search pages. These sites may challenge
   // requests, so only show results when a title link can be verified in HTML.
-  for (const [provider, searchUrl] of providers.slice(0, 3)) {
+  for (const [provider, searchUrl] of [providers[1]]) {
     if ((provider === 'ankergames.net' || provider === 'Zeigames') && primary.some(link => link.provider === provider)) continue;
     try {
-      const response = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) });
+      const response = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(2500) });
       if (!response.ok) { providerState.set(provider, 'unavailable'); continue; }
       const html = await response.text();
       if (!html || /enable javascript and cookies to continue|just a moment|access denied/i.test(html)) { providerState.set(provider, 'unavailable'); continue; }
@@ -1226,46 +1226,6 @@ async function findGameLinks(game) {
       }
     } catch { providerState.set(provider, 'unavailable'); }
   }
-  // Zeigames may reject background HTTP requests and Google can omit valid,
-  // older topics. Fall back to its own search UI in Chromium, using the same
-  // session as the visible download browser.
-  if (!primary.some(link => link.provider === 'Zeigames')) {
-    const page = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true } });
-    try {
-      await page.loadURL(`https://zeigames.com/search/?q=${query}`);
-      let inspected = { text: '', links: [] };
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        try {
-          inspected = await page.webContents.executeJavaScript(`({
-            text: (document.body?.innerText || '').slice(0, 16000),
-            links: [...document.querySelectorAll('a[href*="/topic/"]')].slice(0, 100).map(link => ({
-              url: link.href,
-              title: (link.innerText || link.textContent || '').trim()
-            }))
-          })`);
-        } catch { inspected = { text: '', links: [] }; }
-        if (inspected.links.length || (inspected.text && !/performing security verification|just a moment/i.test(inspected.text))) break;
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      const seen = new Set();
-      for (const candidate of inspected.links || []) {
-        try {
-          const url = new URL(candidate.url);
-          if (!/^(www\.)?zeigames\.com$/i.test(url.hostname) || !/^\/topic\/[^/]+\/?$/.test(url.pathname)) continue;
-          url.search = '';
-          url.hash = '';
-          const slugTitle = url.pathname.split('/').filter(Boolean).pop().replace(/^\d+-/, '').replace(/-/g, ' ');
-          if (!matchesTitleTerms(`${candidate.title} ${slugTitle}`) || seen.has(url.href)) continue;
-          seen.add(url.href);
-          primary.push({ provider: 'Zeigames', title: candidate.title || slugTitle, url: url.href, discoveredBy: 'Zeigames search' });
-          providerState.set('Zeigames', 'found');
-          if (seen.size >= 3) break;
-        } catch { /* ignore malformed topic links */ }
-      }
-      if (!seen.size && inspected.text && !/just a moment|access denied|error 403/i.test(inspected.text)) providerState.set('Zeigames', 'not-found');
-    } catch { if (!providerState.has('Zeigames')) providerState.set('Zeigames', 'unavailable'); }
-    finally { if (!page.isDestroyed()) page.destroy(); }
-  }
   // AnkerGames titles frequently contain punctuation that is omitted from its
   // slugs (for example, "Marvel's" becomes "marvels"). Only use a direct slug
   // after the page itself confirms the requested title.
@@ -1274,7 +1234,7 @@ async function findGameLinks(game) {
     if (slug) {
       const candidateUrl = `https://ankergames.net/game/${slug}`;
       try {
-        const response = await fetch(candidateUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000), redirect: 'follow' });
+        const response = await fetch(candidateUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(2500), redirect: 'follow' });
         const html = response.ok ? await response.text() : '';
         const pageText = html.replace(/<script\b[\s\S]*?<\/script>/gi, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&(?:amp|#0*38);/gi, '&').replace(/&#0*39;|&apos;/gi, "'").replace(/&quot;/gi, '"').replace(/\s+/g, ' ');
         const normalizedPage = normalize(pageText);
@@ -1285,29 +1245,6 @@ async function findGameLinks(game) {
         } else if (response.status === 404 || response.ok) providerState.set('ankergames.net', 'not-found');
         else providerState.set('ankergames.net', 'unavailable');
       } catch { if (!providerState.has('ankergames.net')) providerState.set('ankergames.net', 'unavailable'); }
-      if (!primary.some(link => link.provider === 'ankergames.net') && providerState.get('ankergames.net') === 'unavailable') {
-        const page = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true } });
-        try {
-          await page.loadURL(candidateUrl);
-          await new Promise(resolve => setTimeout(resolve, 1200));
-          const inspected = await page.webContents.executeJavaScript(`({
-            url: location.href,
-            title: document.title || '',
-            heading: document.querySelector('h1')?.innerText || '',
-            text: (document.body?.innerText || '').slice(0, 12000)
-          })`);
-          const parsed = new URL(inspected.url);
-          const pageIdentity = normalize(`${inspected.title} ${inspected.heading}`);
-          const exactTitle = new RegExp(`(^|\\s)${queryTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\s)`).test(pageIdentity);
-          if (/^(www\.)?ankergames\.net$/i.test(parsed.hostname) && /^\/game\/[^/]+\/?$/.test(parsed.pathname) && exactTitle) {
-            primary.push({ provider: 'ankergames.net', title: inspected.heading || title, url: inspected.url });
-            providerState.set('ankergames.net', 'found');
-          } else if (inspected.text && !/just a moment|access denied|error 403/i.test(inspected.text)) {
-            providerState.set('ankergames.net', 'not-found');
-          }
-        } catch { /* retain the unavailable result from the HTTP check */ }
-        finally { if (!page.isDestroyed()) page.destroy(); }
-      }
     }
   }
   const secondary = providers.slice(2).map(([provider, url]) => ({
@@ -1321,8 +1258,8 @@ async function findGameLinks(game) {
     availability: providerState.get('ankergames.net') || 'not-found'
   }];
   const zeigamesStatus = zeigamesResults.length ? [] : [{
-    provider: 'Zeigames', title,
-    availability: providerState.get('Zeigames') || 'not-found'
+    provider: 'Zeigames', title: `Search ${title} on Zeigames`, url: `https://zeigames.com/search/?q=${query}`,
+    availability: 'search', fallback: true
   }];
   return [...ankerResults, ...ankerStatus, ...onlineFixResults, ...zeigamesResults, ...zeigamesStatus, ...secondary.filter(link => link.provider !== 'Zeigames')];
 }
@@ -1794,6 +1731,10 @@ app.whenReady().then(async () => {
       job.status = job.packages.some(pkg => pkg.required && pkg.status === 'FAILED') ? 'FAILED' : 'WAITING_FOR_FILES';
       job.updatedAt = new Date().toISOString();
     }
+    if (job.status === 'WAITING_FOR_FILES' && !(job.packages || []).some(pkg => pkg.downloadRecordId)) {
+      job.status = 'AWAITING_DOWNLOAD';
+      job.updatedAt = new Date().toISOString();
+    }
   }
   await saveStore();
   registerUpdates(() => mainWindow, saveStore, () => store.settings);
@@ -1912,6 +1853,7 @@ function ensureInstallationPackage(game, installRoot) {
   if (!job && definition.packageType !== 'MAIN_GAME') job = store.installationJobs.find(item => item.gameKey === gameKey && item.status === 'COMPLETE' && item.installationTarget && item.gameRecordId);
   if (!job) {
     job = { id: require('crypto').randomUUID(), gameId: game.id || null, gameKey, gameName: game.name,
+      game: { id: game.id || null, name: game.name, coverUrl: game.coverUrl || '', source: game.source || game.provider || '' },
       installDirectory: installRoot, packages: [], status: 'DOWNLOADING', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     store.installationJobs.unshift(job);
   }
@@ -1953,7 +1895,8 @@ function ensureInstallationPackage(game, installRoot) {
   pkg.optional = !pkg.required;
   pkg.status = ['DOWNLOADED', 'READY', 'COMPLETE', 'EXTRACTING', 'APPLYING'].includes(pkg.status) ? pkg.status : 'WAITING';
   job.installDirectory = installRoot;
-  job.status = job.packages.some(item => item.status === 'DOWNLOADING') ? 'DOWNLOADING' : 'WAITING_FOR_FILES';
+  job.status = job.packages.some(item => item.status === 'DOWNLOADING') ? 'DOWNLOADING'
+    : job.packages.some(item => item.downloadRecordId || !['WAITING'].includes(item.status)) ? 'WAITING_FOR_FILES' : 'AWAITING_DOWNLOAD';
   job.updatedAt = new Date().toISOString();
   return { job, pkg };
 }
@@ -2440,6 +2383,7 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       onlineFixContext = { pkg: fixPackage, url: fixPackage.downloadUrl || game.onlineFixUrl };
     }
   }
+  if (packageContext?.job && !packageContext.job.packages.some(pkg => pkg.downloadRecordId)) packageContext.job.status = 'AWAITING_DOWNLOAD';
   await saveStore();
   downloadHistory.changed();
   if (!downloadBrowserSession) {
@@ -2646,6 +2590,7 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
     await dialog.showMessageBox(mainWindow, { type: 'info', buttons: ['OK'], title: 'Online Fix',
       message: 'Please click the Online Fix download link to begin downloading the Online Fix files.' });
   }
+  downloadStatus(`Source opened for ${browserGame.name}. Click the site's Download button to start the file transfer.`);
   publishDownloadBrowserTabs();
   return { onlineFix: packageContext?.job.onlineFixChoice === 'yes', installationJobId: packageContext?.job.id || null };
 });
@@ -2716,6 +2661,16 @@ ipcMain.handle('downloads:retry', async (_event, retryId) => {
 });
 ipcMain.handle('downloads:list', () => downloadHistory.list());
 ipcMain.handle('installation-jobs:list', () => store.installationJobs || []);
+ipcMain.handle('installation-jobs:dismiss', async (_event, id) => {
+  const job = store.installationJobs?.find(item => item.id === id);
+  if (!job) return true;
+  const records = downloadHistory.entries.filter(item => item.installationJobId === id);
+  if (records.length || job.packages.some(pkg => ['DOWNLOADING', 'EXTRACTING', 'APPLYING', 'INSTALLING'].includes(pkg.status))) {
+    throw new Error('Remove this installation from Download history, or wait for its active work to finish.');
+  }
+  store.installationJobs = store.installationJobs.filter(item => item.id !== id);
+  await saveStore(); publishInstallationJobs(); return true;
+});
 async function safeDownloadFiles(entries) {
   const files = new Set();
   for (const entry of entries) {
@@ -2766,6 +2721,14 @@ ipcMain.handle('downloads:clear', async () => {
   store.installationJobs = [];
   store.downloadSessions = [];
   await saveStore(); downloadHistory.changed(); return true;
+});
+ipcMain.handle('downloads:clearList', async () => {
+  if (activeDownloads.size || downloadHistory.installing.size) throw new Error('Wait for active downloads and installations to finish before clearing the list.');
+  // This clears Chrona's UI records only. Downloaded archives remain on disk.
+  store.downloadHistory = [];
+  store.installationJobs = [];
+  store.downloadSessions = [];
+  await saveStore(); downloadHistory.changed(); publishInstallationJobs(); return true;
 });
 ipcMain.handle('browser:control', (_event, action, value) => {
   if (action === 'minimize') { minimizeDownloadBrowser(); return true; }
