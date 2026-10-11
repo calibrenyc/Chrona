@@ -1253,10 +1253,12 @@ async function findGameLinks(game) {
   const ankerResults = primary.filter(link => link.provider === 'ankergames.net');
   const onlineFixResults = primary.filter(link => link.provider === 'Online-Fix');
   const zeigamesResults = primary.filter(link => link.provider === 'Zeigames');
-  const ankerStatus = ankerResults.length ? [] : [{
-    provider: 'ankergames.net', title,
-    availability: providerState.get('ankergames.net') || 'not-found'
-  }];
+  const ankerSlug = title.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[\u2019']/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const ankerState = providerState.get('ankergames.net') || 'not-found';
+  const ankerStatus = ankerResults.length ? [] : ankerState === 'unavailable' && ankerSlug ? [{
+    provider: 'ankergames.net', title: `Open likely AnkerGames page for ${title}`,
+    url: `https://ankergames.net/game/${ankerSlug}`, availability: 'unverified', fallback: true
+  }] : [{ provider: 'ankergames.net', title, availability: ankerState }];
   const zeigamesStatus = zeigamesResults.length ? [] : [{
     provider: 'Zeigames', title: `Search ${title} on Zeigames`, url: `https://zeigames.com/search/?q=${query}`,
     availability: 'search', fallback: true

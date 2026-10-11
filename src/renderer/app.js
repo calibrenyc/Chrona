@@ -580,7 +580,12 @@ window.launcher.appVersion()
   .then((version) => { document.querySelector('#chronaVersion').textContent = `Version ${version}`; })
   .catch(() => { document.querySelector('#chronaVersion').textContent = 'Version unavailable'; });
 
-document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => {
+document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', async () => {
+  // A WebContentsView sits above the renderer while a source site is open.
+  // Always hide it before changing app pages so it cannot intercept input on
+  // the Store (or any other Chrona page) after navigation.
+  await window.launcher.browserControl('minimize').catch(() => false);
+  document.querySelector('#downloadBrowserBar').hidden = true;
   activePage = button.dataset.page;
   hideContextMenu(); render(); if (activePage === 'store') renderStorePage();
 }));
@@ -648,7 +653,7 @@ async function openStoreLinks(game) {
         const unavailable = link.availability === 'unavailable';
         return `<div class="link-result link-result-unavailable" role="status"><strong>${attribute(link.provider)}</strong><span>${unavailable ? 'Could not check this site' : `Not found on ${attribute(link.provider)}`}</span><small>${unavailable ? 'Site unavailable · Try again later' : 'Not on the selected site'}</small></div>`;
       }
-      if (link.fallback) return `<button class="link-result link-result-primary" data-link-url="${attribute(link.url)}" data-online-fix-url="${attribute(onlineFixUrl)}" data-package-type="${packageType}" data-package-required="${required}"><strong>${attribute(link.provider)}</strong><span>${attribute(link.title)}</span><small>Search site in Chrona</small></button>`;
+      if (link.fallback) return `<button class="link-result link-result-primary" data-link-url="${attribute(link.url)}" data-online-fix-url="${attribute(onlineFixUrl)}" data-package-type="${packageType}" data-package-required="${required}"><strong>${attribute(link.provider)}</strong><span>${attribute(link.title)}</span><small>${link.availability === 'unverified' ? 'Open suggested page · verify title' : 'Search site in Chrona'}</small></button>`;
       return `<button class="link-result link-result-primary" data-link-url="${attribute(link.url)}" data-online-fix-url="${attribute(onlineFixUrl)}" data-package-type="${packageType}" data-package-required="${required}"><strong>${attribute(link.provider)}</strong><span>${attribute(link.title)}</span><small>${required ? 'Required' : 'Optional'} package · Open in Chrona</small></button>`;
     };
     const discoveredOnlineFixUrl = fixLinks.find(link => link.url)?.url || '';
