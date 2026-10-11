@@ -2443,6 +2443,8 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       const downloadLabel = installPackage ? `${selected.name} — ${installPackage.name}` : selected.name;
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('download:started', { id: downloadId, name: downloadLabel, packageType: installPackage?.type || null });
       const startedAt = Date.now(); let lastJobPublish = 0; let providerTimedOut = false;
+      let lastReceivedBytes = 0; let lastRateSampleAt = startedAt; let currentRate = 0; let lastByteAt = startedAt;
+      let reconnectAttempts = 0; let reconnecting = false; let lastProgressPersist = 0; let progressPersistPending = false;
       let fullSince = 0; let finalizingFullDownload = false; let forceComplete = false;
       const recoverCompletedDownload = async () => {
         if (finalizingFullDownload || forceComplete) return;
@@ -2473,13 +2475,39 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
         }
       };
       const reportProgress = () => {
-        const elapsed = Math.max(1, (Date.now() - startedAt) / 1000); const receivedBytes = item.getReceivedBytes(); const expectedBytes = item.getTotalBytes(); const speed = receivedBytes / elapsed;
+        const now = Date.now(); const receivedBytes = item.getReceivedBytes(); const expectedBytes = item.getTotalBytes();
+        const sampleSeconds = Math.max(0.1, (now - lastRateSampleAt) / 1000);
+        const addedBytes = Math.max(0, receivedBytes - lastReceivedBytes);
+        if (addedBytes > 0) {
+          const sampleRate = addedBytes / sampleSeconds;
+          currentRate = currentRate ? currentRate * 0.65 + sampleRate * 0.35 : sampleRate;
+          lastByteAt = now; reconnectAttempts = 0;
+        } else currentRate *= 0.45;
+        lastReceivedBytes = receivedBytes; lastRateSampleAt = now;
         if (installPackage) { installPackage.receivedBytes = receivedBytes; installPackage.expectedBytes = expectedBytes; installPackage.progress = expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) : null; }
-        downloadStatus(`Downloading: ${downloadLabel} — ${expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) + '%' : Math.round(receivedBytes / 1048576) + ' MB'} — ${formatRate(speed)} download, 0 B/s upload`, downloadId);
-        if (!receivedBytes && Date.now() - startedAt >= 5000) {
+        record.receivedBytes = receivedBytes; record.expectedBytes = expectedBytes;
+        if (now - lastProgressPersist >= 5000 && !progressPersistPending) {
+          lastProgressPersist = now; progressPersistPending = true;
+          void saveStore().catch(() => {}).finally(() => { progressPersistPending = false; });
+        }
+        if (reconnecting) downloadStatus(`Reconnecting: ${downloadLabel} - the provider stopped sending data`, downloadId);
+        else if (receivedBytes > 0 && now - lastByteAt >= 30000 && reconnectAttempts >= 3) {
+          downloadStatus(`Download stalled: ${downloadLabel} - use Pause then Resume, or retry the source`, downloadId);
+        } else downloadStatus(`Downloading: ${downloadLabel} — ${expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) + '%' : Math.round(receivedBytes / 1048576) + ' MB'} — ${formatRate(currentRate)} download, 0 B/s upload`, downloadId);
+        if (!reconnecting && receivedBytes > 0 && now - lastByteAt >= 20000 && reconnectAttempts < 3 && !item.isPaused() && item.canResume()) {
+          reconnecting = true; reconnectAttempts++;
+          item.pause();
+          downloadStatus(`Reconnecting (${reconnectAttempts}/3): ${downloadLabel}`, downloadId);
+          setTimeout(() => {
+            if (!activeDownloads.has(downloadId)) return;
+            try { if (item.isPaused() && item.canResume()) item.resume(); }
+            finally { reconnecting = false; lastByteAt = Date.now(); }
+          }, 1500).unref();
+        }
+        if (!receivedBytes && now - startedAt >= 5000) {
           downloadStatus(`Waiting for provider: ${downloadLabel} - 0% - no data received yet`, downloadId);
         }
-        if (!receivedBytes && Date.now() - startedAt >= 60000 && !providerTimedOut) {
+        if (!receivedBytes && now - startedAt >= 60000 && !providerTimedOut) {
           providerTimedOut = true;
           void appendDownloadDebugLog('DOWNLOAD', `${selected.name}; provider sent no data for 60 seconds; cancelling ${item.getURL()}`);
           item.cancel();
