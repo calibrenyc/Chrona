@@ -501,7 +501,7 @@
           <button id="closeLinksModal">Close</button>
         </header>
         <p class="links-help">Search results from the configured game sources. Choose one to continue in Chrona.</p>
-        <div class="store-loading" id="linksLoading"><div class="chronograph"><span></span></div><strong>Finding links…</strong><small>Sources that are unavailable will still get a direct search link.</small></div>
+        <div class="store-loading" id="linksLoading"><div class="chronograph"><span></span></div><strong>Finding links…</strong><small>Checking each source for a matching game page.</small></div>
         <div class="links-results" id="linksResults"></div>
       </section>
     </div>
@@ -510,6 +510,15 @@
         <header><div><p>Multi-part download</p><h2 id="multipartTitle">Downloading Multi-Part Game</h2></div><button id="closeMultipart">Close</button></header>
         <p id="multipartSummary"></p><div id="multipartFiles" class="multipart-files"></div>
         <div class="multipart-actions"><button id="multipartOpenPage">Open game page</button><button id="multipartConfirm" class="primary">Yes, Continue</button><button id="multipartMissing">No, Missing a File</button></div>
+      </section>
+    </div>
+    <div class="modal-backdrop" id="launcherChoiceModal">
+      <section class="cover-modal launcher-choice-modal">
+        <header><div><p>Installation complete</p><h2>Which file should be used to launch this game?</h2></div></header>
+        <p id="launcherChoiceGame"></p>
+        <label>Detected launch files<select id="installedLauncherCandidates"></select></label>
+        <p id="launcherChoiceError" class="saved-download-error"></p>
+        <div class="multipart-actions"><button id="deferLauncherChoice">Choose later</button><button id="browseInstalledLauncher">Browse…</button><button id="saveInstalledLauncher" class="primary">Use selected file</button></div>
       </section>
     </div>
     <div class="modal-backdrop" id="multipartCountModal"><section class="cover-modal multipart-modal"><header><div><p>Multi-part download</p><h2>Total Parts</h2></div></header><label>How many parts does this download contain?<input id="multipartCountInput" type="number" min="2" max="100" value="2"></label><div class="multipart-actions"><button id="multipartCountCancel">Cancel</button><button id="multipartCountConfirm" class="primary">Continue</button></div></section></div>

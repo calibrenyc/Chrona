@@ -13,7 +13,7 @@ function classifyProvider(name) {
     return { id: 'online-fix', packageType: 'ONLINE_FIX', installBehavior: 'OVERLAY', supportsMultipart: true };
   }
   if (/zeigames/.test(normalized)) {
-    return { id: 'zeigames', packageType: 'MAIN_GAME', installBehavior: 'EXTRACT', supportsMultipart: true };
+    return { id: 'zeigames', packageType: 'MAIN_GAME', installBehavior: 'EXTRACT', supportsMultipart: false };
   }
   if (/ankergames/.test(normalized)) {
     return { id: 'ankergames', packageType: 'MAIN_GAME', installBehavior: 'EXTRACT', supportsMultipart: false };

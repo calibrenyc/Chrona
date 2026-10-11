@@ -9,7 +9,7 @@ const { atomicJson, readJson: readDistributionJson, validStore, recoverLibraryFr
 const { registerUpdates } = require('./distribution/service');
 const releaseService = require('./distribution/releases');
 const { DownloadHistory } = require('./download-history');
-const { packageDefinition, isSupportedGamePackage } = require('./download-providers');
+const { classifyProvider, packageDefinition, isSupportedGamePackage } = require('./download-providers');
 const downloadHistory = new DownloadHistory({ getStore: () => store, save: () => saveStore(),
   install: (...args) => finishDownload(...args), changed: () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('downloads:changed');
@@ -50,6 +50,7 @@ const SKIP_DIRS = new Set([
 ]);
 
 let mainWindow;
+const pendingLauncherChoices = new Map();
 const playingTracker = new PlayingTracker(game => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('game:playing', game);
@@ -1101,37 +1102,110 @@ async function findGameLinks(game) {
     ['Xbox', `https://www.xbox.com/en-US/search?q=${query}`],
     ['Ubisoft Store', `https://store.ubisoft.com/us/search?q=${query}`]
   ];
-  const normalize = value => value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const normalize = value => value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[\u2019']/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
   const queryTitle = normalize(title);
   const terms = queryTitle.split(/\s+/).filter(Boolean);
+  const matchesTitleTerms = identityTerms => {
+    const words = Array.isArray(identityTerms) ? identityTerms : normalize(identityTerms).split(/\s+/);
+    const score = terms.filter(term => words.includes(term)).length;
+    const sequelNumbers = terms.filter(term => /^\d+$/.test(term));
+    return sequelNumbers.every(number => words.includes(number)) && score >= Math.max(1, Math.ceil(terms.length * 0.75));
+  };
   const primary = [];
-  const ankerSlug = queryTitle.replace(/\s+/g, '-');
-  if (ankerSlug) primary.push({ provider: 'ankergames.net', title, url: `https://ankergames.net/game/${ankerSlug}`, fallback: true });
-  primary.push({ provider: 'Zeigames', title: `Search ${title} on Zeigames`, url: `https://zeigames.com/search/?q=${query}`, fallback: true });
-  // Zeigames uses forum topic URLs and does not support the WordPress-style
-  // `?s=` search route. Use a site-restricted search to resolve the topic URL.
+  const providerState = new Map();
+  const googleHtml = search => fetch(`https://www.google.com/search?q=${encodeURIComponent(search)}`, {
+    headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000)
+  }).then(response => response.ok ? response.text() : '').catch(() => '');
+  // Start both independent lookups together so one source cannot make the
+  // other wait through its entire network timeout.
+  const ankerGoogle = googleHtml(`site:ankergames.net/game "${title}"`);
+  const zeigamesGoogle = googleHtml(`site:zeigames.com/topic "${title}"`);
+  // AnkerGames blocks many direct background searches, while Google indexes
+  // its game pages reliably. Discover the real page URL there before trying a
+  // predicted slug.
   try {
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(`site:zeigames.com/topic ${title}`)}`;
-    const response = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) });
-    const html = response.ok ? await response.text() : '';
-    const topicPattern = /https?:\/\/(?:www\.)?zeigames\.com\/topic\/[^\"'&<>\s]+/gi;
-    const seen = new Set();
-    for (const match of html.matchAll(topicPattern)) {
-      const url = match[0].replace(/\\u003d/g, '=').replace(/\\u0026/g, '&').replace(/[),.;]+$/, '');
-      if (seen.has(url) || /\/topic\/(?:search|page\/)/i.test(url)) continue;
-      seen.add(url);
-      primary.push({ provider: 'Zeigames', title: url.split('/topic/')[1].replace(/-/g, ' ').replace(/\/$/, ''), url });
-      if (seen.size >= 5) break;
-    }
-  } catch { /* search engines may be unavailable or challenge automated requests */ }
+    const html = await ankerGoogle;
+    if (html && !/unusual traffic|automated queries|enable javascript and cookies/i.test(html)) {
+      const linkPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      const seen = new Set();
+      let match;
+      while ((match = linkPattern.exec(html))) {
+        const rawHref = match[1].replace(/&amp;/g, '&');
+        let discovered = rawHref;
+        if (/^\/url\?/i.test(rawHref)) discovered = new URL(rawHref, 'https://www.google.com').searchParams.get('q') || '';
+        try {
+          const url = new URL(discovered);
+          if (!/^(www\.)?ankergames\.net$/i.test(url.hostname) || !/^\/game\/[^/]+\/?$/.test(url.pathname)) continue;
+          const resultTitle = match[2].replace(/<[^>]+>/g, ' ').replace(/&#0*39;|&apos;/gi, "'").replace(/&quot;/gi, '"').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+          const slugTitle = url.pathname.split('/').filter(Boolean).pop().replace(/-/g, ' ');
+          const identityTerms = normalize(`${resultTitle} ${slugTitle}`).split(' ');
+          if (!matchesTitleTerms(identityTerms) || seen.has(url.href)) continue;
+          seen.add(url.href);
+          primary.push({ provider: 'ankergames.net', title: resultTitle || title, url: url.href, discoveredBy: 'Google' });
+          providerState.set('ankergames.net', 'found');
+          if (seen.size >= 3) break;
+        } catch { /* ignore malformed Google result links */ }
+      }
+      if (!seen.size) {
+        const embeddedPattern = /https?:\/\/(?:www\.)?ankergames\.net\/game\/[^"'&<>\s\\]+/gi;
+        for (const embedded of html.matchAll(embeddedPattern)) {
+          try {
+            const url = new URL(embedded[0].replace(/[),.;]+$/, ''));
+            const slugTerms = normalize(url.pathname.split('/').filter(Boolean).pop().replace(/-/g, ' ')).split(' ');
+            if (!matchesTitleTerms(slugTerms) || seen.has(url.href)) continue;
+            seen.add(url.href);
+            primary.push({ provider: 'ankergames.net', title, url: url.href, discoveredBy: 'Google' });
+            providerState.set('ankergames.net', 'found');
+            if (seen.size >= 3) break;
+          } catch { /* ignore malformed embedded URLs */ }
+        }
+      }
+      if (!seen.size) providerState.set('ankergames.net', 'not-found');
+    } else providerState.set('ankergames.net', 'unavailable');
+  } catch { providerState.set('ankergames.net', 'unavailable'); }
+  // Zeigames uses forum topics rather than predictable game-page slugs. Read
+  // Google's actual results and only keep topics whose title or slug matches.
+  try {
+    const html = await zeigamesGoogle;
+    if (html && !/unusual traffic|automated queries|enable javascript and cookies/i.test(html)) {
+      const candidates = [];
+      const anchorPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      let match;
+      while ((match = anchorPattern.exec(html))) {
+        const rawHref = match[1].replace(/&amp;/g, '&');
+        const href = /^\/url\?/i.test(rawHref) ? new URL(rawHref, 'https://www.google.com').searchParams.get('q') : rawHref;
+        candidates.push({ href, label: match[2].replace(/<[^>]+>/g, ' ').replace(/&#0*39;|&apos;/gi, "'").replace(/&quot;/gi, '"').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim() });
+      }
+      for (const embedded of html.matchAll(/https?:\/\/(?:www\.)?zeigames\.com\/topic\/[^"'&<>\s\\]+/gi)) candidates.push({ href: embedded[0].replace(/[),.;]+$/, ''), label: '' });
+      const seen = new Set();
+      for (const candidate of candidates) {
+        try {
+          const url = new URL(candidate.href);
+          if (!/^(www\.)?zeigames\.com$/i.test(url.hostname) || !/^\/topic\/[^/]+\/?$/.test(url.pathname) || /\/topic\/(?:search|page\/)/i.test(url.pathname)) continue;
+          url.search = '';
+          url.hash = '';
+          const slugTitle = url.pathname.split('/').filter(Boolean).pop().replace(/-/g, ' ');
+          const identityTerms = normalize(`${candidate.label} ${slugTitle}`).split(' ');
+          if (!matchesTitleTerms(identityTerms) || seen.has(url.href)) continue;
+          seen.add(url.href);
+          primary.push({ provider: 'Zeigames', title: candidate.label || slugTitle, url: url.href, discoveredBy: 'Google' });
+          providerState.set('Zeigames', 'found');
+          if (seen.size >= 3) break;
+        } catch { /* ignore malformed Google result links */ }
+      }
+      if (!seen.size) providerState.set('Zeigames', 'not-found');
+    } else providerState.set('Zeigames', 'unavailable');
+  } catch { providerState.set('Zeigames', 'unavailable'); }
   // Do not fabricate hits from generic search pages. These sites may challenge
   // requests, so only show results when a title link can be verified in HTML.
   for (const [provider, searchUrl] of providers.slice(0, 3)) {
+    if ((provider === 'ankergames.net' || provider === 'Zeigames') && primary.some(link => link.provider === provider)) continue;
     try {
       const response = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) });
-      if (!response.ok) continue;
+      if (!response.ok) { providerState.set(provider, 'unavailable'); continue; }
       const html = await response.text();
-      if (!html || /enable javascript and cookies to continue|just a moment|access denied/i.test(html)) continue;
+      if (!html || /enable javascript and cookies to continue|just a moment|access denied/i.test(html)) { providerState.set(provider, 'unavailable'); continue; }
+      providerState.set(provider, 'not-found');
       const linkPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
       const seen = new Set();
       let match;
@@ -1139,8 +1213,7 @@ async function findGameLinks(game) {
         const url = new URL(match[1].replace(/&amp;/g, '&'), searchUrl);
         const linkTitle = match[2].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#0*39;|&apos;/gi, "'").replace(/&quot;/gi, '"').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
         const normalized = normalize(linkTitle);
-        const score = terms.filter(term => normalized.split(' ').includes(term)).length;
-        if (!linkTitle || score < Math.max(1, Math.ceil(terms.length * 0.75))) continue;
+        if (!linkTitle || !matchesTitleTerms(normalized)) continue;
         if (provider === 'ankergames.net') {
           if (!/^(www\.)?ankergames\.net$/i.test(url.hostname) || !/^\/game\/[^/]+\/?$/.test(url.pathname)) continue;
         } else if (provider === 'Online-Fix') {
@@ -1149,16 +1222,109 @@ async function findGameLinks(game) {
         if (seen.has(url.href)) continue;
         seen.add(url.href);
         primary.push({ provider, title: linkTitle, url: url.href });
+        providerState.set(provider, 'found');
       }
-    } catch { /* blocked or unavailable providers return no matches */ }
+    } catch { providerState.set(provider, 'unavailable'); }
+  }
+  // Zeigames may reject background HTTP requests and Google can omit valid,
+  // older topics. Fall back to its own search UI in Chromium, using the same
+  // session as the visible download browser.
+  if (!primary.some(link => link.provider === 'Zeigames')) {
+    const page = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true } });
+    try {
+      await page.loadURL(`https://zeigames.com/search/?q=${query}`);
+      let inspected = { text: '', links: [] };
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        try {
+          inspected = await page.webContents.executeJavaScript(`({
+            text: (document.body?.innerText || '').slice(0, 16000),
+            links: [...document.querySelectorAll('a[href*="/topic/"]')].slice(0, 100).map(link => ({
+              url: link.href,
+              title: (link.innerText || link.textContent || '').trim()
+            }))
+          })`);
+        } catch { inspected = { text: '', links: [] }; }
+        if (inspected.links.length || (inspected.text && !/performing security verification|just a moment/i.test(inspected.text))) break;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      const seen = new Set();
+      for (const candidate of inspected.links || []) {
+        try {
+          const url = new URL(candidate.url);
+          if (!/^(www\.)?zeigames\.com$/i.test(url.hostname) || !/^\/topic\/[^/]+\/?$/.test(url.pathname)) continue;
+          url.search = '';
+          url.hash = '';
+          const slugTitle = url.pathname.split('/').filter(Boolean).pop().replace(/^\d+-/, '').replace(/-/g, ' ');
+          if (!matchesTitleTerms(`${candidate.title} ${slugTitle}`) || seen.has(url.href)) continue;
+          seen.add(url.href);
+          primary.push({ provider: 'Zeigames', title: candidate.title || slugTitle, url: url.href, discoveredBy: 'Zeigames search' });
+          providerState.set('Zeigames', 'found');
+          if (seen.size >= 3) break;
+        } catch { /* ignore malformed topic links */ }
+      }
+      if (!seen.size && inspected.text && !/just a moment|access denied|error 403/i.test(inspected.text)) providerState.set('Zeigames', 'not-found');
+    } catch { if (!providerState.has('Zeigames')) providerState.set('Zeigames', 'unavailable'); }
+    finally { if (!page.isDestroyed()) page.destroy(); }
+  }
+  // AnkerGames titles frequently contain punctuation that is omitted from its
+  // slugs (for example, "Marvel's" becomes "marvels"). Only use a direct slug
+  // after the page itself confirms the requested title.
+  if (!primary.some(link => link.provider === 'ankergames.net')) {
+    const slug = title.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[\u2019']/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (slug) {
+      const candidateUrl = `https://ankergames.net/game/${slug}`;
+      try {
+        const response = await fetch(candidateUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000), redirect: 'follow' });
+        const html = response.ok ? await response.text() : '';
+        const pageText = html.replace(/<script\b[\s\S]*?<\/script>/gi, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&(?:amp|#0*38);/gi, '&').replace(/&#0*39;|&apos;/gi, "'").replace(/&quot;/gi, '"').replace(/\s+/g, ' ');
+        const normalizedPage = normalize(pageText);
+        const exactTitle = new RegExp(`(^|\\s)${queryTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\s)`).test(normalizedPage);
+        if (response.ok && /^(www\.)?ankergames\.net$/i.test(new URL(response.url).hostname) && exactTitle) {
+          primary.push({ provider: 'ankergames.net', title, url: response.url });
+          providerState.set('ankergames.net', 'found');
+        } else if (response.status === 404 || response.ok) providerState.set('ankergames.net', 'not-found');
+        else providerState.set('ankergames.net', 'unavailable');
+      } catch { if (!providerState.has('ankergames.net')) providerState.set('ankergames.net', 'unavailable'); }
+      if (!primary.some(link => link.provider === 'ankergames.net') && providerState.get('ankergames.net') === 'unavailable') {
+        const page = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true } });
+        try {
+          await page.loadURL(candidateUrl);
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          const inspected = await page.webContents.executeJavaScript(`({
+            url: location.href,
+            title: document.title || '',
+            heading: document.querySelector('h1')?.innerText || '',
+            text: (document.body?.innerText || '').slice(0, 12000)
+          })`);
+          const parsed = new URL(inspected.url);
+          const pageIdentity = normalize(`${inspected.title} ${inspected.heading}`);
+          const exactTitle = new RegExp(`(^|\\s)${queryTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\s)`).test(pageIdentity);
+          if (/^(www\.)?ankergames\.net$/i.test(parsed.hostname) && /^\/game\/[^/]+\/?$/.test(parsed.pathname) && exactTitle) {
+            primary.push({ provider: 'ankergames.net', title: inspected.heading || title, url: inspected.url });
+            providerState.set('ankergames.net', 'found');
+          } else if (inspected.text && !/just a moment|access denied|error 403/i.test(inspected.text)) {
+            providerState.set('ankergames.net', 'not-found');
+          }
+        } catch { /* retain the unavailable result from the HTTP check */ }
+        finally { if (!page.isDestroyed()) page.destroy(); }
+      }
+    }
   }
   const secondary = providers.slice(2).map(([provider, url]) => ({
     provider, title: `Search ${title} on ${provider}`, url, fallback: true
   }));
   const ankerResults = primary.filter(link => link.provider === 'ankergames.net');
   const onlineFixResults = primary.filter(link => link.provider === 'Online-Fix');
-  const zeigamesResults = primary.filter(link => link.provider === 'Zeigames').sort((a, b) => Number(!!a.fallback) - Number(!!b.fallback));
-  return [...ankerResults, ...onlineFixResults, ...zeigamesResults, ...secondary.filter(link => link.provider !== 'Zeigames')];
+  const zeigamesResults = primary.filter(link => link.provider === 'Zeigames');
+  const ankerStatus = ankerResults.length ? [] : [{
+    provider: 'ankergames.net', title,
+    availability: providerState.get('ankergames.net') || 'not-found'
+  }];
+  const zeigamesStatus = zeigamesResults.length ? [] : [{
+    provider: 'Zeigames', title,
+    availability: providerState.get('Zeigames') || 'not-found'
+  }];
+  return [...ankerResults, ...ankerStatus, ...onlineFixResults, ...zeigamesResults, ...zeigamesStatus, ...secondary.filter(link => link.provider !== 'Zeigames')];
 }
 const VERSION_FILE = '.chrona-version.json';
 const UPDATE_INTERVAL = 12 * 60 * 60 * 1000;
@@ -1458,6 +1624,28 @@ ipcMain.handle('game:pickExecutable', async () => {
   });
   return result.canceled ? null : result.filePaths[0];
 });
+ipcMain.handle('launcher:select', async (_event, gameId, executablePath) => {
+  const game = store.games.find(item => item.id === gameId);
+  if (!game?.installPath) throw new Error('The installed game was not found.');
+  const selected = path.resolve(String(executablePath || ''));
+  const relative = path.relative(path.resolve(game.installPath), selected);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !EXECUTABLE_EXTENSIONS.has(path.extname(selected).toLowerCase())) throw new Error('Choose a supported launcher inside the installed game folder.');
+  const stat = await fs.lstat(selected).catch(() => null);
+  if (!stat?.isFile() || stat.isSymbolicLink()) throw new Error('The selected launcher is unavailable.');
+  game.executablePath = selected;
+  game.workingDirectory = path.dirname(selected);
+  game.launchType = /\.(bat|cmd)$/i.test(selected) ? 'bat' : 'exe';
+  await saveStore();
+  pendingLauncherChoices.get(gameId)?.();
+  pendingLauncherChoices.delete(gameId);
+  if (!mainWindow.isDestroyed()) mainWindow.webContents.send('library:changed');
+  return true;
+});
+ipcMain.handle('launcher:defer', (_event, gameId) => {
+  pendingLauncherChoices.get(gameId)?.();
+  pendingLauncherChoices.delete(gameId);
+  return true;
+});
 ipcMain.handle('game:launch', async (_event, gameId) => {
   const game = store.games.find((item) => item.id === gameId);
   if (!game) throw new Error('Game was not found.');
@@ -1487,29 +1675,29 @@ ipcMain.handle('store:info', async (_event, gameId) => getStoreInfo(gameId));
 ipcMain.handle('store:search', async (_event, query, filters) => searchStore(query, filters || {}));
 ipcMain.handle('store:catalog', async (_event, filters) => searchStore('', filters || {}));
 ipcMain.handle('store:links', async (_event, game) => findGameLinks(game));
-ipcMain.handle('zeigames:warning', async () => {
-  const result = await dialog.showMessageBox(mainWindow, { type: 'warning', buttons: ['Continue', 'Go Back'], defaultId: 0, cancelId: 1, title: 'Zeigames', message: 'Zeigames commonly uses multi-part downloads. Do you want to continue?' });
-  return result.response === 0;
-});
 ipcMain.handle('multipart:chooseType', async () => {
   const result = await dialog.showMessageBox(mainWindow, { type: 'question', buttons: ['Single File', 'Multi-Part', 'Cancel'], defaultId: 0, cancelId: 2, title: 'Download type', message: 'Is this game a single-file download or a multi-part download?' });
   return result.response === 0 ? 'single' : result.response === 1 ? 'multi' : null;
 });
 ipcMain.handle('multipart:resumeType', async (_event, game, url, type, count) => {
-  if (!game?.name || !/^https:\/\/zeigames\.com\//i.test(url || '')) throw new Error('A Zeigames game page is required.');
-  if (type === 'single') return { game: { ...game, sourceProvider: 'Zeigames', downloadType: 'single' }, url };
+  if (!game?.name || !/^https?:\/\//i.test(url || '')) throw new Error('A game download page is required.');
+  const provider = classifyProvider(game.sourceProvider);
+  if (!provider.supportsMultipart) throw new Error(`${game.sourceProvider || 'This source'} does not use multi-part downloads.`);
+  if (type === 'single') return { game: { ...game, downloadType: 'single' }, url };
   if (!Number.isInteger(count) || count < 2 || count > 100) throw new Error('Enter a number of parts from 2 to 100.');
-  const session = { id: require('crypto').randomUUID(), source: 'Zeigames', gameTitle: game.name, game: { ...game }, installationJobId: game.installationJobId || null, packageId: game.packageId || 'main-game', originalUrl: url, downloadType: 'multi', expectedParts: count, downloadedPartsCount: 0, downloadedParts: [], status: 'collecting_parts', createdAt: new Date().toISOString() };
+  const session = { id: require('crypto').randomUUID(), source: game.sourceProvider || provider.id, gameTitle: game.name, game: { ...game }, installationJobId: game.installationJobId || null, packageId: game.packageId || 'main-game', originalUrl: url, downloadType: 'multi', expectedParts: count, downloadedPartsCount: 0, downloadedParts: [], status: 'collecting_parts', createdAt: new Date().toISOString() };
   store.downloadSessions ||= []; store.downloadSessions.unshift(session); await saveStore();
-  return { session, game: { ...game, sourceProvider: 'Zeigames', downloadType: 'multi', multipartSessionId: session.id }, url };
+  return { session, game: { ...game, downloadType: 'multi', multipartSessionId: session.id }, url };
 });
 ipcMain.handle('multipart:start', async (_event, game, url, type, count) => {
-  if (!game?.name || !/^https:\/\/zeigames\.com\//i.test(url || '')) throw new Error('A Zeigames game page is required.');
-  if (type === 'single') return { game: { ...game, sourceProvider: 'Zeigames', downloadType: 'single' }, url };
+  if (!game?.name || !/^https?:\/\//i.test(url || '')) throw new Error('A game download page is required.');
+  const provider = classifyProvider(game.sourceProvider);
+  if (!provider.supportsMultipart) throw new Error(`${game.sourceProvider || 'This source'} does not use multi-part downloads.`);
+  if (type === 'single') return { game: { ...game, downloadType: 'single' }, url };
   if (!Number.isInteger(count) || count < 2 || count > 100) throw new Error('Enter a number of parts from 2 to 100.');
-  const session = { id: require('crypto').randomUUID(), source: 'Zeigames', gameTitle: game.name, game: { ...game }, installationJobId: game.installationJobId || null, packageId: game.packageId || 'main-game', originalUrl: url, downloadType: 'multi', expectedParts: count, downloadedPartsCount: 0, downloadedParts: [], status: 'collecting_parts', createdAt: new Date().toISOString() };
+  const session = { id: require('crypto').randomUUID(), source: game.sourceProvider || provider.id, gameTitle: game.name, game: { ...game }, installationJobId: game.installationJobId || null, packageId: game.packageId || 'main-game', originalUrl: url, downloadType: 'multi', expectedParts: count, downloadedPartsCount: 0, downloadedParts: [], status: 'collecting_parts', createdAt: new Date().toISOString() };
   store.downloadSessions ||= []; store.downloadSessions.unshift(session); await saveStore();
-  return { session, game: { ...game, sourceProvider: 'Zeigames', downloadType: 'multi', multipartSessionId: session.id }, url };
+  return { session, game: { ...game, downloadType: 'multi', multipartSessionId: session.id }, url };
 });
 ipcMain.handle('multipart:list', () => store.downloadSessions || []);
 ipcMain.handle('multipart:confirm', async (_event, id, complete) => {
@@ -1550,7 +1738,8 @@ async function completeMultipartSession(session) {
   if (packageRecord && packageRecord.type !== 'MAIN_GAME' && packageRecord.installBehavior === 'OVERLAY') {
     if (!job.installationTarget) {
       const mainPackage = job.packages.find(item => item.id === 'main-game');
-      if (mainPackage?.downloadRecordId && !pending) await downloadHistory.installSaved(mainPackage.downloadRecordId);
+      const mainDownload = mainPackage?.downloadRecordId && downloadHistory.entries.find(item => item.id === mainPackage.downloadRecordId);
+      if (mainDownload?.complete && !pending) await downloadHistory.installSaved(mainPackage.downloadRecordId);
       else { job.status = 'WAITING_FOR_FILES'; session.status = 'waiting_for_files'; await saveStore(); return session; }
     } else {
       await waitForInstallQueue();
@@ -1901,13 +2090,38 @@ async function finishDownload(file, game, installRoot, record) {
   if (packageRecord && packageRecord.type !== 'MAIN_GAME' && packageRecord.installBehavior === 'OVERLAY') {
     if (!job.installationTarget) throw new Error(`Download the main game package before applying ${packageRecord.name || 'this package'}.`);
     packageRecord.status = 'APPLYING'; packageRecord.overlayTarget = job.installationTarget; job.status = 'APPLYING'; job.updatedAt = new Date().toISOString(); await saveStore();
+    publishInstallationJobs();
     const manifest = await applyOnlineFixOverlay(job.installationTarget, file, packageRecord, job, record?.multiPartFiles || []);
     packageRecord.overlayManifest = path.relative(job.installationTarget, path.join(job.installationTarget, '.chrona', 'overlays', safeFolderName(packageRecord.id || packageRecord.type).toLowerCase(), 'manifest.json')).split(path.sep).join('/');
     packageRecord.status = 'COMPLETE'; packageRecord.filesAdded = manifest.filesAdded.length; packageRecord.filesReplaced = manifest.filesReplaced.length;
     job.status = 'COMPLETE'; job.updatedAt = new Date().toISOString(); await saveStore();
+    publishInstallationJobs();
     if (record?.multipartSessionId) {
       const multipart = store.downloadSessions?.find(item => item.id === record.multipartSessionId);
       if (multipart) { multipart.status = 'completed'; await saveStore(); }
+    }
+    // If the main archive was already extracted and this is an overlay retry,
+    // finish the library handoff without extracting the completed main package again.
+    if (!job.gameRecordId) {
+      const mainPackage = job.packages.find(item => item.type === 'MAIN_GAME');
+      const mainRecord = mainPackage?.downloadRecordId && downloadHistory.entries.find(item => item.id === mainPackage.downloadRecordId);
+      if (!mainRecord?.installationTarget) throw new Error('The completed main-game installation could not be resumed.');
+      const target = mainRecord.installationTarget;
+      const sourceGame = mainRecord.game || game;
+      const root = path.resolve(mainRecord.installRoot);
+      const launchers = await findLaunchers(target);
+      const launcher = launchers.find(item => /(^|[\\/])(run me!?|start|play|launcher)\.(bat|cmd|exe)$/i.test(item.name)) || launchers.find(item => /\.exe$/i.test(item.path)) || launchers.find(item => !/\.(url|lnk)$/i.test(item.path));
+      const installedGame = { id: stableId(['portable', target]), name: sourceGame.name, source: 'Portable', status: 'installed', installPath: target,
+        executablePath: launcher?.path || '', launchType: launcher?.type || 'exe', workingDirectory: launcher ? path.dirname(launcher.path) : target,
+        libraryPath: root, coverUrl: sourceGame.coverUrl || '', addedAt: new Date().toISOString() };
+      await recordInstalledVersion(installedGame, sourceGame.downloadVersion);
+      if (!store.games.some(item => item.id === installedGame.id)) store.games.push(installedGame);
+      mainRecord.installedGameId = installedGame.id;
+      job.gameRecordId = installedGame.id; job.status = 'COMPLETE'; job.updatedAt = new Date().toISOString();
+      await downloadHistory.update(mainRecord, { status: 'installed', error: '', installedAt: new Date().toISOString() });
+      await saveStore(); publishInstallationJobs();
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('library:changed');
+      await chooseGameLauncher(installedGame.id).catch(error => downloadStatus(`Game installed. Choose its launcher from the library: ${error.message}`));
     }
     return { status: 'applied' };
   }
@@ -1927,15 +2141,23 @@ async function finishDownload(file, game, installRoot, record) {
     try { await fs.mkdir(candidate); target = candidate; } catch (error) { if (error.code !== 'EEXIST') throw error; }
   }
   if (record) { record.installationTarget = target; await saveStore(); }
-  if (job) { job.installationTarget = target; job.status = 'INSTALLING'; if (packageRecord) packageRecord.status = 'EXTRACTING'; await saveStore(); }
+  if (job) { job.installationTarget = target; job.status = 'INSTALLING'; if (packageRecord) packageRecord.status = 'EXTRACTING'; await saveStore(); publishInstallationJobs(); }
   downloadStatus(`Preparing ${game.name}...`);
   if (record?.multiPartFiles?.length) await extractGameArchive(file, target, record.multiPartFiles);
   else if (/\.(zip|rar|7z)$/i.test(file)) await extractGameArchive(file, target);
   else await fs.copyFile(file, path.join(target, path.basename(file)));
+  if (packageRecord) { packageRecord.status = 'COMPLETE'; await saveStore(); publishInstallationJobs(); }
   const overlayPackages = job?.packages.filter(item => item.type !== 'MAIN_GAME' && item.installBehavior === 'OVERLAY' && ['DOWNLOADED', 'COMPLETE'].includes(item.status) && item.file) || [];
   for (const overlayPackage of overlayPackages) {
     if (overlayPackage.status === 'COMPLETE') continue;
-    const manifest = await applyOnlineFixOverlay(target, overlayPackage.file, overlayPackage, job, (overlayPackage.parts || []).map(part => part.file).filter(Boolean));
+    overlayPackage.status = 'APPLYING'; job.status = 'APPLYING'; job.updatedAt = new Date().toISOString(); await saveStore(); publishInstallationJobs();
+    let manifest;
+    try {
+      manifest = await applyOnlineFixOverlay(target, overlayPackage.file, overlayPackage, job, (overlayPackage.parts || []).map(part => part.file).filter(Boolean));
+    } catch (error) {
+      overlayPackage.status = 'FAILED'; overlayPackage.error = error.message; job.status = 'FAILED'; job.updatedAt = new Date().toISOString();
+      await saveStore(); publishInstallationJobs(); throw error;
+    }
     overlayPackage.status = 'COMPLETE'; overlayPackage.filesAdded = manifest.filesAdded.length; overlayPackage.filesReplaced = manifest.filesReplaced.length;
     overlayPackage.overlayManifest = path.relative(target, path.join(target, '.chrona', 'overlays', safeFolderName(overlayPackage.id || overlayPackage.type).toLowerCase(), 'manifest.json')).split(path.sep).join('/');
     const overlayDownload = overlayPackage.downloadRecordId && downloadHistory.find(overlayPackage.downloadRecordId);
@@ -1946,6 +2168,7 @@ async function finishDownload(file, game, installRoot, record) {
         if (multipart) multipart.status = 'completed';
       }
     }
+    await saveStore(); publishInstallationJobs();
   }
   const launchers = await findLaunchers(target);
   const launcher = launchers.find(item => /(^|[\\/])(run me!?|start|play|launcher)\.(bat|cmd|exe)$/i.test(item.name)) || launchers.find(item => /\.exe$/i.test(item.path)) || launchers.find(item => !/\.(url|lnk)$/i.test(item.path));
@@ -2038,13 +2261,13 @@ async function finishGameUpdate(file, gameId, metadata) {
 async function chooseGameLauncher(gameId) {
   const game = store.games.find(item => item.id === gameId);
   if (!game) return;
-  const result = await dialog.showOpenDialog(mainWindow, { title: `Choose the launcher for ${game.name}`, defaultPath: game.installPath, properties: ['openFile'], filters: [{ name: 'Game launchers', extensions: ['exe', 'bat', 'cmd', 'lnk', 'url'] }] });
-  if (result.canceled || !result.filePaths[0]) return;
-  game.executablePath = result.filePaths[0];
-  game.workingDirectory = path.dirname(result.filePaths[0]);
-  game.launchType = /\.(bat|cmd)$/i.test(result.filePaths[0]) ? 'bat' : 'exe';
-  await saveStore();
-  if (!mainWindow.isDestroyed()) mainWindow.webContents.send('library:changed');
+  const candidates = await findLaunchers(game.installPath);
+  if (mainWindow.isDestroyed()) return;
+  await new Promise(resolve => {
+    pendingLauncherChoices.set(gameId, resolve);
+    mainWindow.webContents.send('launcher:choose', { gameId, gameName: game.name,
+      candidates: candidates.map(item => ({ ...item, relativePath: path.relative(game.installPath, item.path) })) });
+  });
 }
 function resizeDownloadBrowser() {
   if (!downloadBrowserTabs.size && !downloadBrowser) return;
@@ -2180,6 +2403,43 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
   browserGame.packageId = packageContext?.pkg.id || null;
   browserGame.packageType = packageContext?.pkg.type || null;
   browserGame.packageRequired = packageContext?.pkg.required ?? null;
+  let onlineFixContext = null;
+  if (packageContext?.pkg.type === 'MAIN_GAME' && !packageContext.job.onlineFixChoice) {
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'question', buttons: ['No', 'Yes'], defaultId: 0, cancelId: 0,
+      title: 'Online Fix', message: 'Does this game have an Online Fix?'
+    });
+    packageContext.job.onlineFixChoice = choice.response === 1 ? 'yes' : 'no';
+    packageContext.job.onlineFixPromptedAt = new Date().toISOString();
+    if (choice.response === 1) {
+      let fixPackage = packageContext.job.packages.find(entry => entry.type === 'ONLINE_FIX');
+      if (!fixPackage) {
+        fixPackage = { id: 'online-fix', name: 'Online Fix', type: 'ONLINE_FIX', source: 'Online-Fix', downloadUrl: '',
+          status: 'WAITING', required: true, optional: false, dependsOn: 'MAIN_GAME', installOrder: 2,
+          installBehavior: 'OVERLAY', extractionRequired: true, fileType: null, overlayTarget: 'MAIN_GAME', archiveGroup: 'online-fix',
+          expectedParts: null, parts: [], files: [] };
+        packageContext.job.packages.push(fixPackage);
+      }
+      fixPackage.required = true;
+      fixPackage.optional = false;
+      const fallbackFixUrl = `https://online-fix.me/index.php?do=search&subaction=search&story=${encodeURIComponent(game.name)}`;
+      const fixUrl = /^https?:\/\//i.test(game.onlineFixUrl || '') ? game.onlineFixUrl : fixPackage.downloadUrl || fallbackFixUrl;
+      fixPackage.downloadUrl = fixUrl;
+      onlineFixContext = { pkg: fixPackage, url: fixUrl };
+      packageContext.job.status = 'WAITING_FOR_FILES';
+    } else {
+      for (const fixPackage of packageContext.job.packages.filter(entry => entry.type === 'ONLINE_FIX' && entry.status === 'WAITING')) {
+        fixPackage.required = false;
+        fixPackage.optional = true;
+      }
+    }
+    packageContext.job.updatedAt = new Date().toISOString();
+  } else if (packageContext?.pkg.type === 'MAIN_GAME' && packageContext.job.onlineFixChoice === 'yes') {
+    const fixPackage = packageContext.job.packages.find(entry => entry.type === 'ONLINE_FIX');
+    if (fixPackage && !['DOWNLOADING', 'DOWNLOADED', 'COMPLETE'].includes(fixPackage.status)) {
+      onlineFixContext = { pkg: fixPackage, url: fixPackage.downloadUrl || game.onlineFixUrl };
+    }
+  }
   await saveStore();
   downloadHistory.changed();
   if (!downloadBrowserSession) {
@@ -2228,37 +2488,6 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
         return;
       }
       const activeSession = selected.multipartSessionId && store.downloadSessions?.find(session => session.id === selected.multipartSessionId);
-      if (selected.sourceProvider === 'Zeigames' && !activeSession && selected.downloadType !== 'single') {
-        const warning = await dialog.showMessageBox(mainWindow, {
-          type: 'warning',
-          buttons: ['Continue', 'Go Back'],
-          defaultId: 0,
-          cancelId: 1,
-          title: 'Zeigames',
-          message: 'Zeigames commonly uses multi-part downloads. Do you want to continue?'
-        });
-        if (warning.response !== 0) {
-          item.cancel();
-          if (sourceTab) activateDownloadBrowserTab(sourceTab.id);
-          return;
-        }
-        const typeChoice = await dialog.showMessageBox(mainWindow, {
-          type: 'question',
-          buttons: ['Single File', 'Multi-Part', 'Cancel'],
-          defaultId: 0,
-          cancelId: 2,
-          title: 'Download type',
-          message: 'Is this game a single-file download or a multi-part download?'
-        });
-        if (typeChoice.response === 2) { item.cancel(); if (sourceTab) activateDownloadBrowserTab(sourceTab.id); return; }
-        if (typeChoice.response === 0) selected.downloadType = 'single';
-        else {
-          item.cancel();
-          if (sourceTab) activateDownloadBrowserTab(sourceTab.id);
-          mainWindow.webContents.send('multipart:requestCount', { game: selected, url: selected.downloadSourceUrl });
-          return;
-        }
-      }
       if (selected.downloadType === 'multi' && !selected.multipartSessionId) {
         const found = store.downloadSessions?.find(session => session.originalUrl === selected.downloadSourceUrl && session.status !== 'completed');
         if (found) selected.multipartSessionId = found.id;
@@ -2285,7 +2514,8 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       downloadHistory.changed();
       minimizeDownloadBrowser();
       publishDownloadBrowserTabs();
-      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('download:started', { id: downloadId, name: selected.name });
+      const downloadLabel = installPackage ? `${selected.name} — ${installPackage.name}` : selected.name;
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('download:started', { id: downloadId, name: downloadLabel, packageType: installPackage?.type || null });
       const startedAt = Date.now(); let lastJobPublish = 0; let providerTimedOut = false;
       let fullSince = 0; let finalizingFullDownload = false; let forceComplete = false;
       const recoverCompletedDownload = async () => {
@@ -2319,9 +2549,9 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       const reportProgress = () => {
         const elapsed = Math.max(1, (Date.now() - startedAt) / 1000); const receivedBytes = item.getReceivedBytes(); const expectedBytes = item.getTotalBytes(); const speed = receivedBytes / elapsed;
         if (installPackage) { installPackage.receivedBytes = receivedBytes; installPackage.expectedBytes = expectedBytes; installPackage.progress = expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) : null; }
-        downloadStatus(`Downloading: ${selected.name} — ${expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) + '%' : Math.round(receivedBytes / 1048576) + ' MB'} — ${formatRate(speed)} download, 0 B/s upload`, downloadId);
+        downloadStatus(`Downloading: ${downloadLabel} — ${expectedBytes ? Math.round(receivedBytes / expectedBytes * 100) + '%' : Math.round(receivedBytes / 1048576) + ' MB'} — ${formatRate(speed)} download, 0 B/s upload`, downloadId);
         if (!receivedBytes && Date.now() - startedAt >= 5000) {
-          downloadStatus(`Waiting for provider: ${selected.name} - 0% - no data received yet`, downloadId);
+          downloadStatus(`Waiting for provider: ${downloadLabel} - 0% - no data received yet`, downloadId);
         }
         if (!receivedBytes && Date.now() - startedAt >= 60000 && !providerTimedOut) {
           providerTimedOut = true;
@@ -2381,7 +2611,8 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
                 else {
                   const mainPackage = installJob.packages.find(entry => entry.id === 'main-game');
                   const pending = installJob.packages.find(entry => entry.required && entry.id !== 'main-game' && !['DOWNLOADED', 'COMPLETE'].includes(entry.status));
-                  if (mainPackage?.downloadRecordId && !pending) await downloadHistory.installSaved(mainPackage.downloadRecordId);
+                  const mainDownload = mainPackage?.downloadRecordId && downloadHistory.entries.find(entry => entry.id === mainPackage.downloadRecordId);
+                  if (mainDownload?.complete && !pending) await downloadHistory.installSaved(mainPackage.downloadRecordId);
                   else { installJob.status = 'WAITING_FOR_FILES'; await saveStore(); }
                 }
               } else {
@@ -2397,7 +2628,7 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
             downloadStatus(providerTimedOut ? `Provider timed out: ${selected.name}. Retry the download source.` : `Download ${state}: ${selected.name}. Open Downloads for details.`, downloadId);
           }
         } catch (error) {
-          if (installPackage && record.complete) { installPackage.status = 'FAILED'; installJob.status = installPackage.required ? 'FAILED' : installJob.installationTarget ? 'COMPLETE' : 'WAITING_FOR_FILES'; installJob.updatedAt = new Date().toISOString(); await saveStore().catch(() => {}); }
+          if (installPackage && record.complete && installPackage.status !== 'COMPLETE') { installPackage.status = 'FAILED'; installJob.status = installPackage.required ? 'FAILED' : installJob.installationTarget ? 'COMPLETE' : 'WAITING_FOR_FILES'; installJob.updatedAt = new Date().toISOString(); await saveStore().catch(() => {}); }
           await downloadHistory.update(record, { status: record.complete ? 'failed' : 'interrupted', error: error.message }).catch(console.error);
           downloadStatus(`Could not prepare ${selected.name}: ${error.message}. Install the saved file from Downloads.`, downloadId);
         }
@@ -2406,7 +2637,17 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
     });
   }
   if (!createDownloadBrowserTab(url, browserGame, { activate: true, title: browserGame.sourceProvider || '' })) throw new Error('Close a download browser tab before opening another.');
+  if (onlineFixContext?.url) {
+    const fixGame = { ...browserGame, sourceProvider: 'Online-Fix', downloadSourceUrl: onlineFixContext.url,
+      packageId: onlineFixContext.pkg.id, packageType: 'ONLINE_FIX', packageRequired: true,
+      installBehavior: 'OVERLAY', multipartSessionId: null, downloadType: null };
+    const fixTab = createDownloadBrowserTab(onlineFixContext.url, fixGame, { activate: true, title: 'Online Fix' });
+    if (!fixTab) downloadStatus('Close a browser tab, open a new tab, and navigate to the Online Fix download page.');
+    await dialog.showMessageBox(mainWindow, { type: 'info', buttons: ['OK'], title: 'Online Fix',
+      message: 'Please click the Online Fix download link to begin downloading the Online Fix files.' });
+  }
   publishDownloadBrowserTabs();
+  return { onlineFix: packageContext?.job.onlineFixChoice === 'yes', installationJobId: packageContext?.job.id || null };
 });
 
 let startupRelease = null;
@@ -2468,6 +2709,9 @@ function formatRate(bytes) { if (!bytes) return '0 B/s'; const units = ['B/s', '
 ipcMain.handle('downloads:control', async (_event, id, action) => { const item = activeDownloads.get(id); if (!item) return false; if (action === 'pause' && !item.isPaused()) item.pause(); else if (action === 'resume' && item.isPaused()) item.resume(); else if (action === 'cancel') item.cancel(); else return false; return true; });
 ipcMain.handle('downloads:retry', async (_event, retryId) => {
   const record = downloadHistory.find(retryId);
+  const job = record.installationJobId && store.installationJobs?.find(item => item.id === record.installationJobId);
+  const failedPackage = job?.packages.find(pkg => pkg.status === 'FAILED' && pkg.downloadRecordId);
+  if (failedPackage && failedPackage.downloadRecordId !== retryId) return downloadHistory.installSaved(failedPackage.downloadRecordId);
   return downloadHistory.installSaved(retryId);
 });
 ipcMain.handle('downloads:list', () => downloadHistory.list());

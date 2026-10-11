@@ -643,18 +643,23 @@ async function openStoreLinks(game) {
     const fixLinks = links.filter(isOnlineFix);
     const otherLinks = [];
     const attribute = value => String(value || '').replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
-    const renderLink = (link, packageType, required) => `<button class="link-result link-result-primary" data-link-url="${attribute(link.url)}" data-package-type="${packageType}" data-package-required="${required}"><strong>${attribute(link.provider)}</strong><span>${attribute(link.title)}</span><small>${required ? 'Required' : 'Optional'} package · Open in Chrona</small></button>`;
-    const mainRequired = mainLinks.map(link => renderLink(link, 'MAIN_GAME', true)).join('');
-    const fixRequired = (downloadLinkGame.requiresOnlineFix === true && downloadLinkGame.onlineFixOptional !== true) || (Array.isArray(downloadLinkGame.requiredPackages) && downloadLinkGame.requiredPackages.some(item => String(item?.type).toUpperCase() === 'ONLINE_FIX' && item.required));
-    const fixOptions = fixLinks.map(link => renderLink(link, 'ONLINE_FIX', fixRequired)).join('');
-    document.querySelector('#linksResults').innerHTML = `${mainLinks.length ? '<h3 class="links-group-title">MAIN GAME · REQUIRED</h3>' : ''}${mainRequired}${fixLinks.length ? `<h3 class="links-group-title">ONLINE FIX · ${fixRequired ? 'REQUIRED' : 'OPTIONAL'}</h3>${fixOptions}` : ''}${otherLinks.length ? '<h3 class="links-group-title">Other links</h3>' : ''}${otherLinks.map(link => renderLink(link, 'MAIN_GAME', true)).join('')}`;
+    const renderLink = (link, packageType, required, onlineFixUrl = '') => {
+      if (!link.url) {
+        const unavailable = link.availability === 'unavailable';
+        return `<div class="link-result link-result-unavailable" role="status"><strong>${attribute(link.provider)}</strong><span>${unavailable ? 'Could not check this site' : `Not found on ${attribute(link.provider)}`}</span><small>${unavailable ? 'Site unavailable · Try again later' : 'Not on the selected site'}</small></div>`;
+      }
+      return `<button class="link-result link-result-primary" data-link-url="${attribute(link.url)}" data-online-fix-url="${attribute(onlineFixUrl)}" data-package-type="${packageType}" data-package-required="${required}"><strong>${attribute(link.provider)}</strong><span>${attribute(link.title)}</span><small>${required ? 'Required' : 'Optional'} package · Open in Chrona</small></button>`;
+    };
+    const discoveredOnlineFixUrl = fixLinks.find(link => link.url)?.url || '';
+    const mainRequired = mainLinks.map(link => renderLink(link, 'MAIN_GAME', true, discoveredOnlineFixUrl)).join('');
+    document.querySelector('#linksResults').innerHTML = `${mainLinks.length ? '<h3 class="links-group-title">MAIN GAME · REQUIRED</h3>' : ''}${mainRequired}${otherLinks.length ? '<h3 class="links-group-title">Other links</h3>' : ''}${otherLinks.map(link => renderLink(link, 'MAIN_GAME', true, discoveredOnlineFixUrl)).join('')}`;
   } catch (error) {
     if (request !== linksRequest) return;
     document.querySelector('#linksLoading').classList.remove('open');
     document.querySelector('#linksResults').innerHTML = `<div class="links-empty" role="alert"><span aria-hidden="true">⚠</span><div><strong>Could not check links</strong><p>${error.message}</p></div><button data-retry-links>Check again</button></div>`;
   }
 }
-document.querySelector('#linksResults').addEventListener('click', async e => { const retry = e.target.closest('[data-retry-links]'); if (retry) return openStoreLinks(downloadLinkGame); const result = e.target.closest('[data-link-url]'); if (!result || result.disabled) return; result.disabled = true; const url = result.dataset.linkUrl; try { const sourceProvider = result.querySelector('strong')?.textContent || ''; const packageType = result.dataset.packageType || 'MAIN_GAME'; const packageRequired = result.dataset.packageRequired === 'true'; const openResult = await window.launcher.openDownloadBrowser(url, { ...downloadLinkGame, sourceProvider, packageType, packageRequired }); if (openResult === 'choose-count') { window.pendingMultipart = { game: downloadLinkGame, url }; document.querySelector('#multipartCountModal').classList.add('open'); } else if (openResult !== false) { linksModal.classList.remove('open'); document.querySelector('#downloadBrowserUrl').value = url; document.querySelector('#downloadBrowserBar').hidden = false; } } catch (error) { result.disabled = false; showDownloadStatus(error.message); } });
+document.querySelector('#linksResults').addEventListener('click', async e => { const retry = e.target.closest('[data-retry-links]'); if (retry) return openStoreLinks(downloadLinkGame); const result = e.target.closest('[data-link-url]'); if (!result || result.disabled) return; result.disabled = true; const url = result.dataset.linkUrl; try { const sourceProvider = result.querySelector('strong')?.textContent || ''; const packageType = result.dataset.packageType || 'MAIN_GAME'; const packageRequired = result.dataset.packageRequired === 'true'; const onlineFixUrl = result.dataset.onlineFixUrl || ''; const openResult = await window.launcher.openDownloadBrowser(url, { ...downloadLinkGame, sourceProvider, packageType, packageRequired, onlineFixUrl }); if (openResult === 'choose-count') { window.pendingMultipart = { game: downloadLinkGame, url }; document.querySelector('#multipartCountModal').classList.add('open'); } else if (openResult !== false) { linksModal.classList.remove('open'); document.querySelector('#downloadBrowserUrl').value = url; document.querySelector('#downloadBrowserBar').hidden = false; } } catch (error) { result.disabled = false; showDownloadStatus(error.message); } });
 document.querySelector('#closeLinksModal').addEventListener('click', () => linksModal.classList.remove('open'));
 document.querySelector('#storeDetailLinks').addEventListener('click', () => openStoreLinks(activeStoreGame));
 document.querySelector('#storeDetailSource').addEventListener('click', () => window.launcher.openStore(activeStoreGame.sourceUrl));
@@ -1063,6 +1068,44 @@ window.launcher.onDownloadStarted(payload => {
   document.querySelector('#downloadOverlayText').textContent = item.name;
   document.querySelector('#downloadProgressBar').style.width = '0%';
 });
+let pendingLauncherChoice = null;
+window.launcher.onChooseInstalledLauncher(payload => {
+  pendingLauncherChoice = payload;
+  const select = document.querySelector('#installedLauncherCandidates');
+  select.replaceChildren();
+  for (const candidate of payload.candidates || []) {
+    const option = document.createElement('option');
+    option.value = candidate.path;
+    option.textContent = candidate.relativePath || candidate.name || candidate.path;
+    select.append(option);
+  }
+  document.querySelector('#launcherChoiceGame').textContent = payload.gameName;
+  document.querySelector('#launcherChoiceError').textContent = payload.candidates?.length ? '' : 'No launch files were detected. Use Browse to select one manually.';
+  document.querySelector('#saveInstalledLauncher').disabled = !payload.candidates?.length;
+  document.querySelector('#launcherChoiceModal').classList.add('open');
+});
+document.querySelector('#browseInstalledLauncher').addEventListener('click', async () => {
+  if (!pendingLauncherChoice) return;
+  const selected = await window.launcher.pickExecutable();
+  if (!selected) return;
+  const select = document.querySelector('#installedLauncherCandidates');
+  const option = document.createElement('option'); option.value = selected; option.textContent = selected; select.append(option); select.value = selected;
+  document.querySelector('#saveInstalledLauncher').disabled = false;
+  document.querySelector('#launcherChoiceError').textContent = '';
+});
+document.querySelector('#saveInstalledLauncher').addEventListener('click', async () => {
+  if (!pendingLauncherChoice) return;
+  const selected = document.querySelector('#installedLauncherCandidates').value;
+  try {
+    await window.launcher.selectInstalledLauncher(pendingLauncherChoice.gameId, selected);
+    document.querySelector('#launcherChoiceModal').classList.remove('open'); pendingLauncherChoice = null;
+  } catch (error) { document.querySelector('#launcherChoiceError').textContent = error.message; }
+});
+document.querySelector('#deferLauncherChoice').addEventListener('click', async () => {
+  if (!pendingLauncherChoice) return;
+  await window.launcher.deferInstalledLauncher(pendingLauncherChoice.gameId);
+  document.querySelector('#launcherChoiceModal').classList.remove('open'); pendingLauncherChoice = null;
+});
 let multipartSessions = [];
 let currentMultipartId = null;
 async function refreshMultipart() { multipartSessions = await window.launcher.listMultipart(); renderMultipart(); }
@@ -1078,7 +1121,7 @@ function renderMultipart() {
   }).join('') + (parts.filter(part => !part.related).map(part => `<p class="multipart-warning">Possibly unrelated file: ${part.name}</p>`).join(''));
   document.querySelector('#multipartConfirm').hidden = parts.length < session.expectedParts || session.status === 'missing_parts';
   document.querySelector('#multipartMissing').hidden = parts.length < session.expectedParts || session.status === 'missing_parts';
-  document.querySelector('#multipartOpenPage').onclick = async () => { await window.launcher.openDownloadBrowser(session.originalUrl, { ...session.game, sourceProvider: 'Zeigames', downloadType: 'multi', multipartSessionId: session.id }); document.querySelector('#downloadBrowserBar').hidden = false; };
+  document.querySelector('#multipartOpenPage').onclick = async () => { await window.launcher.openDownloadBrowser(session.originalUrl, { ...session.game, sourceProvider: session.source || session.game.sourceProvider, downloadType: 'multi', multipartSessionId: session.id }); document.querySelector('#downloadBrowserBar').hidden = false; };
   document.querySelector('#multipartModal').classList.add('open');
 }
 window.launcher.onMultipartChanged(async session => { await refreshMultipart(); currentMultipartId = session.id; renderMultipart(); });
@@ -1087,7 +1130,7 @@ window.launcher.onMultipartRequestCount(payload => { window.pendingMultipart = {
 document.querySelector('#multipartCountConfirm').addEventListener('click', async () => { const pending = window.pendingMultipart; const count = Number(document.querySelector('#multipartCountInput').value); if (!pending || !Number.isInteger(count) || count < 2 || count > 100) return; try { const modal = document.querySelector('#multipartCountModal'); modal.classList.remove('open'); const result = await window.launcher.resumeMultipartType(pending.game, pending.url, 'multi', count); currentMultipartId = result.session.id; await refreshMultipart(); const opened = await window.launcher.openDownloadBrowser(result.url, result.game); if (opened !== false) { linksModal.classList.remove('open'); document.querySelector('#downloadBrowserBar').hidden = false; } } catch (error) { showDownloadStatus(error.message); } });
 document.querySelector('#multipartConfirm').addEventListener('click', async () => { try { await window.launcher.confirmMultipart(currentMultipartId, true); await refreshMultipart(); } catch (error) { showDownloadStatus(error.message); } });
 document.querySelector('#multipartCountCancel').addEventListener('click', () => document.querySelector('#multipartCountModal').classList.remove('open'));
-document.querySelector('#multipartMissing').addEventListener('click', async () => { try { const session = await window.launcher.confirmMultipart(currentMultipartId, false); currentMultipartId = session.id; renderMultipart(); await window.launcher.openDownloadBrowser(session.originalUrl, { ...session.game, sourceProvider: 'Zeigames', downloadType: 'multi', multipartSessionId: session.id }); document.querySelector('#downloadBrowserBar').hidden = false; } catch (error) { showDownloadStatus(error.message); } });
+document.querySelector('#multipartMissing').addEventListener('click', async () => { try { const session = await window.launcher.confirmMultipart(currentMultipartId, false); currentMultipartId = session.id; renderMultipart(); await window.launcher.openDownloadBrowser(session.originalUrl, { ...session.game, sourceProvider: session.source || session.game.sourceProvider, downloadType: 'multi', multipartSessionId: session.id }); document.querySelector('#downloadBrowserBar').hidden = false; } catch (error) { showDownloadStatus(error.message); } });
 document.querySelector('#closeMultipart').addEventListener('click', () => document.querySelector('#multipartModal').classList.remove('open'));
 void refreshMultipart();
 window.launcher.onDownloadUrl(url => { document.querySelector('#downloadBrowserUrl').value = url; });

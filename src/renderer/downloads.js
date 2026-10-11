@@ -31,7 +31,7 @@ async function refreshDownloadHistory() {
     const busy = ['downloading', 'installing'].includes(entry.status);
     if (entry.complete && !entry.multipartPart && !['installed', 'applied'].includes(entry.status)) historyButton(actions, entry.status === 'failed' ? 'Retry installation' : 'Install saved file', () => window.launcher.retryDownload(entry.id), busy || !entry.fileExists);
     historyButton(actions, 'Show file', () => window.launcher.revealDownload(entry.id), !entry.fileExists);
-    if (!entry.complete && entry.game?.downloadSourceUrl) historyButton(actions, 'Open download source', async () => {
+    if (!entry.complete && entry.game?.downloadSourceUrl) historyButton(actions, 'Retry download', async () => {
       await window.launcher.openDownloadBrowser(entry.game.downloadSourceUrl, entry.game);
       document.querySelector('#downloadBrowserBar').hidden = false;
     }, busy);
@@ -66,6 +66,10 @@ async function refreshInstallationJobs() {
         const progress = document.createElement('div'); progress.className = 'installation-package-progress';
         const fill = document.createElement('i'); fill.style.width = `${Math.max(0, Math.min(100, pkg.progress))}%`; progress.append(fill); row.append(progress);
         row.append(historyElement('small', `${pkg.progress}% downloaded`));
+      }
+      if (['EXTRACTING', 'APPLYING'].includes(pkg.status)) {
+        const progress = document.createElement('div'); progress.className = 'installation-package-progress active'; progress.append(document.createElement('i')); row.append(progress);
+        row.append(historyElement('small', pkg.status === 'APPLYING' ? 'Applying Online Fix after the main game…' : 'Extracting main game…'));
       }
       if (pkg.expectedParts) row.append(historyElement('small', `${(pkg.parts || []).filter(part => part.status === 'DOWNLOADED').length} / ${pkg.expectedParts} parts`));
       else if (pkg.files?.length) row.append(historyElement('small', `${pkg.files.length} file${pkg.files.length === 1 ? '' : 's'}`));
