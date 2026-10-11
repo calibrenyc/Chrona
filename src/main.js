@@ -1775,20 +1775,13 @@ function isBlockedAdUrl(value) {
     return blockedAdHosts.test(parsed.hostname) || /(^|\.)(ad|ads|advert|popup|popunder|banner|tracker|track|analytics)[0-9-]*\./i.test(parsed.hostname) || blockedAdPaths.test(parsed.pathname);
   } catch { return true; }
 }
-function isAnkerHost(value) {
-  try { const host = new URL(value).hostname.toLowerCase(); return host === 'ankergames.net' || host.endsWith('.ankergames.net'); }
-  catch { return false; }
-}
-function isAnkerDownloadTab(tab) {
-  return isAnkerHost(tab.pageOrigin) || /ankergames\.net/i.test(String(tab.game?.sourceProvider || ''));
-}
-function allowTabNavigation(tab, value) {
+function allowTabNavigation(_tab, value) {
   if (!/^https?:\/\//i.test(value || '') || isBlockedAdUrl(value)) return false;
-  return !isAnkerDownloadTab(tab) || isAnkerHost(value);
+  return true;
 }
 function publishDownloadBrowserTabs() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const tabs = [...downloadBrowserTabs.values()].map(tab => ({ id: tab.id, title: tab.title, url: tab.url, loading: tab.loading, activity: tab.activity || '', sourceRestricted: isAnkerDownloadTab(tab), active: tab.id === activeDownloadTabId, canGoBack: tab.view.webContents.canGoBack(), canGoForward: tab.view.webContents.canGoForward() }));
+  const tabs = [...downloadBrowserTabs.values()].map(tab => ({ id: tab.id, title: tab.title, url: tab.url, loading: tab.loading, activity: tab.activity || '', sourceRestricted: false, active: tab.id === activeDownloadTabId, canGoBack: tab.view.webContents.canGoBack(), canGoForward: tab.view.webContents.canGoForward() }));
   mainWindow.webContents.send('download:tabs', { tabs, activeTabId: activeDownloadTabId, blockedPopupCount, visible: downloadBrowserVisible && downloadBrowserTabs.size > 0 });
 }
 function activateDownloadBrowserTab(id) {
@@ -2238,9 +2231,6 @@ function configureDownloadBrowserTab(tab) {
       void confirmExternalProtocol(url);
       blockedPopupCount++;
       downloadStatus('Popup blocked');
-    } else if (isAnkerDownloadTab(tab) && !isAnkerHost(url)) {
-      blockedPopupCount++;
-      downloadStatus('Blocked external download: AnkerGames links must stay on ankergames.net.');
     } else if (isBlockedAdUrl(url)) {
       blockedPopupCount++;
       downloadStatus('Popup blocked');
@@ -2260,7 +2250,6 @@ function configureDownloadBrowserTab(tab) {
       const parsed = new URL(next);
       if (!/^https?:$/.test(parsed.protocol)) { event.preventDefault(); void confirmExternalProtocol(next); }
       else if (isBlockedAdUrl(next)) { event.preventDefault(); blockedPopupCount++; downloadStatus('Popup blocked'); publishDownloadBrowserTabs(); }
-      else if (isAnkerDownloadTab(tab) && !isAnkerHost(next)) { event.preventDefault(); downloadStatus('Blocked external download: AnkerGames links must stay on ankergames.net.'); }
     } catch { event.preventDefault(); }
   });
   contents.on('will-redirect', (event, next, _inPlace, isMainFrame) => {
@@ -2268,8 +2257,7 @@ function configureDownloadBrowserTab(tab) {
     try { parsed = new URL(next); } catch { parsed = null; }
     if (!allowTabNavigation(tab, next)) {
       event.preventDefault();
-      if (isAnkerDownloadTab(tab) && !isAnkerHost(next)) downloadStatus('Blocked external download: AnkerGames links must stay on ankergames.net.');
-      else { blockedPopupCount++; downloadStatus('Popup blocked'); publishDownloadBrowserTabs(); }
+      blockedPopupCount++; downloadStatus('Popup blocked'); publishDownloadBrowserTabs();
     }
   });
   const navigation = (_event, next) => {
@@ -2425,14 +2413,6 @@ ipcMain.handle('downloads:open', async (_event, url, game) => {
       const downloadFilename = safeFolderName(offeredFilename);
       let file = path.join(folder, `${require('crypto').randomUUID()}-${downloadFilename}`);
       item.setSavePath(file);
-      const downloadUrls = typeof item.getURLChain === 'function' ? item.getURLChain() : [item.getURL()];
-      if (isAnkerDownloadTab(sourceTab) && (!downloadUrls.length || downloadUrls.some(url => !isAnkerHost(url)))) {
-        item.cancel();
-        sourceTab.activity = 'External download blocked';
-        downloadStatus('Blocked external download: AnkerGames downloads must come only from ankergames.net.');
-        publishDownloadBrowserTabs();
-        return;
-      }
       const activeSession = selected.multipartSessionId && store.downloadSessions?.find(session => session.id === selected.multipartSessionId);
       if (selected.downloadType === 'multi' && !selected.multipartSessionId) {
         const found = store.downloadSessions?.find(session => session.originalUrl === selected.downloadSourceUrl && session.status !== 'completed');
