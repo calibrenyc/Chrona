@@ -801,6 +801,16 @@ body[data-mica="on"] .settings-panel,body[data-mica="on"] .store-card,body[data-
 .game-card:hover, .game-card.selected { background: color-mix(in srgb, var(--panel-strong) 86%, transparent); }
 .poster.library-cover { border-radius: 10px; }
 
+/* Keep the Library's interactive surfaces in one compact rectangular system. */
+#libraryPage .search-wrap,
+#libraryPage .toolbar button,
+#libraryPage .library-view-switch button,
+#libraryPage .game-card,
+#libraryPage .poster.library-cover,
+#libraryPage .play { border-radius: 5px; }
+#libraryPage .toolbar-actions { display:flex; gap:8px; flex-wrap:wrap; }
+#libraryPage .toolbar-actions button { padding-inline:14px; }
+
 .settings-panel {
   animation: cardSpring 680ms cubic-bezier(.16, 1, .3, 1) both;
 }

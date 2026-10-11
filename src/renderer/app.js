@@ -457,7 +457,7 @@ function hideContextMenu() {
 async function applyCoverUrl(url) {
   const game = selectedGame();
   if (!game || !url) return;
-  await refresh(await window.launcher.updateGame({ ...game, coverUrl: url.trim() }));
+  await refresh(await window.launcher.updateGame({ ...game, coverUrl: url.trim(), coverArtLocked: true }));
   closeCoverPicker();
 }
 
@@ -549,6 +549,25 @@ document.querySelector('#scan').addEventListener('click', async () => {
   document.querySelector('#scan').textContent = 'Scanning';
   await refresh(await window.launcher.scan());
   document.querySelector('#scan').textContent = 'Scan';
+});
+document.querySelector('#fixCoverArt').addEventListener('click', async () => {
+  if (!window.confirm('Replace automatic cover art with the first available search result for every game?')) return;
+  const button = document.querySelector('#fixCoverArt');
+  button.disabled = true; button.textContent = 'Fixing covers…';
+  try {
+    const result = await window.launcher.fixAllCoverArt();
+    await refresh(result.store);
+    button.textContent = result.updated ? `Fixed ${result.updated}` : 'Covers checked';
+  } catch (error) {
+    button.textContent = 'Fix failed';
+    showDownloadStatus(error.message);
+  } finally {
+    window.setTimeout(() => { button.disabled = false; button.textContent = 'Fix Cover Art'; }, 1800);
+  }
+});
+window.launcher.onCoverFixProgress(progress => {
+  const button = document.querySelector('#fixCoverArt');
+  if (!progress.done) button.textContent = `Fixing ${progress.current}/${progress.total}`;
 });
 
 function renderCurrentlyPlaying(game) {

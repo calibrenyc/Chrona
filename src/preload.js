@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('launcher', {
   onLibraryChanged: (callback) => ipcRenderer.on('library:changed', () => callback()),
   getStore: () => ipcRenderer.invoke('store:get'),
   scan: () => ipcRenderer.invoke('library:scan'),
+  fixAllCoverArt: () => ipcRenderer.invoke('cover:fixAll'),
+  onCoverFixProgress: callback => ipcRenderer.on('cover:fixProgress', (_event, progress) => callback(progress)),
   importSteamLibrary: () => ipcRenderer.invoke('library:importSteam'),
   cancelSteamImport: () => ipcRenderer.invoke('library:cancelSteamImport'),
   detectSteamAccounts: () => ipcRenderer.invoke('steam:detectAccounts'),

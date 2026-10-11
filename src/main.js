@@ -878,6 +878,26 @@ async function findBestCoverForGame(game) {
   return '';
 }
 
+async function refreshLibraryCoverArt({ force = false, notify = false } = {}) {
+  let updated = 0;
+  const total = store.games.length;
+  for (let index = 0; index < total; index += 1) {
+    const game = store.games[index];
+    if (!force && game.coverArtLocked) continue;
+    if (notify && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('cover:fixProgress', { current: index + 1, total, name: game.name, updated, done: false });
+    }
+    const coverUrl = await findBestCoverForGame({ ...game, coverUrl: '' });
+    if (coverUrl && coverUrl !== game.coverUrl) { game.coverUrl = coverUrl; updated += 1; }
+    game.coverArtLocked = false;
+  }
+  await saveStore();
+  if (notify && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('cover:fixProgress', { current: total, total, updated, done: true });
+  }
+  return { store, updated, total };
+}
+
 function artworkTitleKey(title) {
   return title.toLowerCase().replace(/[™®]/g, '').replace(/[^a-z0-9]+/g, '');
 }
@@ -993,11 +1013,14 @@ async function hydrateCoverArt(games) {
       hydrated.push({ ...game, coverUrl: portrait || game.coverUrl });
       continue;
     }
+    // Scans choose the first result for newly discovered games. Existing art
+    // stays stable; the explicit Fix Cover Art action refreshes the library.
     if (game.coverUrl) {
       hydrated.push(game);
       continue;
     }
-    hydrated.push({ ...game, coverUrl: await findBestCoverForGame(game) });
+    const coverUrl = await findBestCoverForGame({ ...game, coverUrl: '' });
+    hydrated.push({ ...game, coverUrl: coverUrl || game.coverUrl || '', coverArtLocked: false });
   }
   return hydrated;
 }
@@ -1490,6 +1513,7 @@ ipcMain.handle('downloads:exclusions', async (_event, enabled) => {
   return refreshDefenderStatus();
 });
 ipcMain.handle('library:scan', scanAll);
+ipcMain.handle('cover:fixAll', async () => refreshLibraryCoverArt({ force: true, notify: true }));
 ipcMain.handle('window:minimize', () => mainWindow.minimize());
 ipcMain.handle('window:maximize', () => {
   if (mainWindow.isMaximized()) mainWindow.unmaximize();
