@@ -296,7 +296,9 @@ button:active {
   background: rgba(3, 6, 12, .20);
 }
 .app-shell > * { position: relative; z-index: 1; }
-.compact-header { position:fixed; z-index:30; inset:0 0 auto; height:56px; display:flex; align-items:center; gap:40px; padding:0 32px; background:linear-gradient(180deg,rgba(8,11,18,.38),transparent); -webkit-app-region:drag; transition:opacity .3s ease,transform .3s ease; }
+.compact-header { position:fixed; z-index:30; inset:0 0 auto; height:56px; display:flex; align-items:center; gap:40px; padding:0 32px; background:transparent; -webkit-app-region:drag; transition:opacity .3s ease,transform .3s ease; }
+.compact-header::before { content:""; position:absolute; inset:0 0 -38px; z-index:0; pointer-events:none; background:linear-gradient(180deg,color-mix(in srgb,var(--bg) 96%,transparent) 0 54%,color-mix(in srgb,var(--bg) 72%,transparent) 72%,transparent 100%); backdrop-filter:blur(16px) saturate(1.25); mask-image:linear-gradient(to bottom,#000 0 62%,transparent 100%); }
+.compact-header > * { position:relative; z-index:1; }
 .compact-brand { display:flex; align-items:center; gap:9px; border:0; padding:0; background:transparent; color:var(--text); font-size:14px; font-weight:700; -webkit-app-region:no-drag; }
 .compact-brand img { width:24px; height:24px; }
 .compact-nav { display:flex!important; align-items:center; gap:6px; margin:0!important; padding:0!important; border:0!important; }
@@ -1007,9 +1009,12 @@ body[data-mica="on"] .settings-panel,body[data-mica="on"] .store-card,body[data-
 
 .game-dialog {
   display: grid;
-  grid-template-columns: minmax(230px, 300px) minmax(360px, 1fr);
-  gap: 16px 26px;
+  grid-template-columns: 190px repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
   align-items: start;
+  width: min(820px, 94vw);
+  max-height: 84vh;
+  padding: 18px;
 }
 
 .game-dialog .modal-close {
@@ -1018,8 +1023,8 @@ body[data-mica="on"] .settings-panel,body[data-mica="on"] .store-card,body[data-
 }
 
 .game-dialog .cover {
-  grid-row: 2 / 9;
-  width: min(280px, 100%);
+  grid-row: 2 / 8;
+  width: min(190px, 100%);
   margin: 0 auto;
   position: sticky;
   top: 0;
@@ -1027,21 +1032,29 @@ body[data-mica="on"] .settings-panel,body[data-mica="on"] .store-card,body[data-
 
 .game-dialog label,
 .game-dialog #detailMeta {
-  grid-column: 2;
+  grid-column: 2 / -1;
   margin-top: 0;
 }
 
 .game-dialog .primary,
 .game-dialog .danger {
-  grid-column: 2;
+  min-height: 36px;
+  margin: 0;
 }
+.game-dialog #saveGame,.game-dialog #deleteGame { grid-column:2; }
+.game-dialog #installGame,.game-dialog #uninstallGame { grid-column:3; }
 
 .game-dialog .store-panel {
   grid-column: 1 / -1;
+  margin-top: 4px;
 }
 
+.game-dialog label { gap:5px; margin:5px 0; }
+.game-dialog label input,.game-dialog label select,.game-dialog .path-row { min-height:38px; }
+.game-dialog #detailMeta { margin-bottom:4px; }
+
 .game-dialog .update-panel {
-  grid-column: 2;
+  grid-column: 2 / -1;
   width: 100%;
   min-width: 0;
   padding: 16px;
@@ -1772,24 +1785,12 @@ label select,
     grid-template-columns: 210px minmax(0, 1fr);
   }
 
-  .game-dialog {
-    grid-template-columns: 1fr;
-  }
-
-  .game-dialog .cover,
-  .game-dialog label,
-  .game-dialog #detailMeta,
-  .game-dialog .primary,
-  .game-dialog .danger,
-  .game-dialog .store-panel {
-    grid-column: 1;
-  }
-
-  .game-dialog .cover {
-    grid-row: auto;
-    position: static;
-    width: min(220px, 80%);
-  }
+}
+@media (max-width: 760px) {
+  .game-dialog { grid-template-columns:1fr; width:min(560px,94vw); }
+  .game-dialog .cover,.game-dialog label,.game-dialog #detailMeta,.game-dialog .primary,.game-dialog .danger,.game-dialog .store-panel { grid-column:1; }
+  .game-dialog #saveGame,.game-dialog #installGame,.game-dialog #deleteGame,.game-dialog #uninstallGame,.game-dialog .update-panel { grid-column:1; }
+  .game-dialog .cover { grid-row:auto; position:static; width:min(180px,70%); }
 }
 #downloadBrowserBar { position: fixed; top: 36px; left: 0; right: 0; height: 110px; padding: 7px 10px; background: #101a2a; color: #e8eef8; border-bottom:1px solid #29374c; z-index: 10000; display:grid; grid-template-rows:42px 44px; gap:5px; }
 #downloadBrowserTabStrip,#downloadBrowserControls { display:flex; align-items:center; gap:7px; min-width:0; }
