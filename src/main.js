@@ -800,10 +800,16 @@ async function scanAll() {
     mergedGame.workingDirectory = game.workingDirectory;
     mergedGame.libraryPath = game.libraryPath;
     if (game.ankerVersion) {
+      const priorVersion = String(existing?.currentVersion || existing?.ankerVersion?.version || '').trim();
+      const priorBuild = String(existing?.currentBuild || existing?.ankerVersion?.build || '').trim();
+      const scannedVersion = String(game.currentVersion || game.ankerVersion.version || '').trim();
+      const scannedBuild = String(game.currentBuild || game.ankerVersion.build || '').trim();
       mergedGame.ankerVersion = game.ankerVersion;
       mergedGame.currentVersion = game.currentVersion;
       mergedGame.currentBuild = game.currentBuild;
-      delete mergedGame.updateInfo;
+      // The update badge belongs to the installed version. A routine scan must
+      // not erase it when the same installation metadata is rediscovered.
+      if (existing?.ankerVersion && (priorVersion !== scannedVersion || priorBuild !== scannedBuild)) delete mergedGame.updateInfo;
     }
     if (!existing?.coverUrl) mergedGame.coverUrl = game.coverUrl;
     merged.push(mergedGame);
@@ -1512,7 +1518,13 @@ ipcMain.handle('downloads:exclusions', async (_event, enabled) => {
   await offerDefenderExclusion(dialog, mainWindow, [store.settings.downloadPath, store.settings.defaultInstallPath].filter(Boolean), enabled);
   return refreshDefenderStatus();
 });
-ipcMain.handle('library:scan', scanAll);
+ipcMain.handle('library:scan', async () => {
+  const result = await scanAll();
+  // Restore/update badges for newly discovered or genuinely changed portable
+  // installations without making the scan button wait on provider checks.
+  void checkTrackedUpdates();
+  return result;
+});
 ipcMain.handle('cover:fixAll', async () => refreshLibraryCoverArt({ force: true, notify: true }));
 ipcMain.handle('window:minimize', () => mainWindow.minimize());
 ipcMain.handle('window:maximize', () => {
